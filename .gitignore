@@ -1,0 +1,37 @@
+*.iml
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+/capture
+/externalBuildHeapObjects
+.externalNativeBuild
+.cxx
+local.properties
+
+# Gradle
+.gradle
+build/
+
+# IntelliJ IDEA
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# Android
+capture/
+/google-services.json
+
+# OSX
+.DS_Store
+
+# Generated files
+/composeApp/build/
+/build/
