@@ -17,14 +17,16 @@ import io.ktor.serialization.kotlinx.json.*
 
 import com.fortuneweather.domain.model.*
 
+import com.fortuneweather.BuildKonfig
+
 /**
  * 여러 날씨 API를 통합하여 평균 날씨와 운세를 산출하는 리포지토리 (확장판)
  */
 class WeatherRepository(private val client: HttpClient) {
 
-    private val openWeatherKey = "" // Add your key here
-    private val weatherApiKey = "" // Add your key here
-    private val kmaServiceKey = "" // Add your key here
+    private val openWeatherKey = BuildKonfig.OPENWEATHER_KEY
+    private val weatherApiKey = BuildKonfig.WEATHERAPI_KEY
+    private val kmaServiceKey = BuildKonfig.KMA_SERVICE_KEY
 
     suspend fun getIntegratedWeather(lat: Double, lon: Double): WeatherInfo = coroutineScope {
         val openWeatherDeferred = async { fetchOpenWeather(lat, lon) }

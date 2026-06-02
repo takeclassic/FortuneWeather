@@ -3,6 +3,25 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.compose")
     kotlin("plugin.serialization")
+    id("com.codingfeline.buildkonfig")
+}
+
+import java.util.Properties
+
+val localProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) {
+        load(file.inputStream())
+    }
+}
+
+buildkonfig {
+    packageName = "com.fortuneweather"
+    defaultConfigs {
+        buildConfigField(com.codingfeline.buildkonfig.compiler.FieldSpec.Type.STRING, "OPENWEATHER_KEY", localProperties.getProperty("OPENWEATHER_KEY") ?: "")
+        buildConfigField(com.codingfeline.buildkonfig.compiler.FieldSpec.Type.STRING, "WEATHERAPI_KEY", localProperties.getProperty("WEATHERAPI_KEY") ?: "")
+        buildConfigField(com.codingfeline.buildkonfig.compiler.FieldSpec.Type.STRING, "KMA_SERVICE_KEY", localProperties.getProperty("KMA_SERVICE_KEY") ?: "")
+    }
 }
 
 kotlin {

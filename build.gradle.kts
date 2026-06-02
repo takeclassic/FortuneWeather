@@ -4,6 +4,7 @@ plugins {
     id("com.android.application") version "8.2.2" apply false
     id("org.jetbrains.compose") version "1.6.1" apply false
     kotlin("plugin.serialization") version "1.9.23" apply false
+    id("com.codingfeline.buildkonfig") version "0.15.1" apply false
 }
 
 allprojects {
