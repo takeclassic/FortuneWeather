@@ -390,23 +390,24 @@ class WeatherRepository(private val client: HttpClient) {
             val morningCond = morningItem?.weather?.firstOrNull()?.description?.let { fix(it) } ?: "맑음"
             val afternoonCond = afternoonItem?.weather?.firstOrNull()?.description?.let { fix(it) } ?: "맑음"
             
-            val hourlyDetails = nonNullItems.map { item ->
-                val localTime = Instant.fromEpochSeconds(item.dt).toLocalDateTime(kstZone)
-                val targetHour = localTime.hour
-                val displayTime = if (targetHour < 12) {
-                    if (targetHour == 0) "오전 12시" else "오전 ${targetHour}시"
-                } else {
-                    if (targetHour == 12) "오후 12시" else "오후 ${targetHour - 12}시"
+            val hourlyDetails = nonNullItems
+                .filter { item ->
+                    val localTime = Instant.fromEpochSeconds(item.dt).toLocalDateTime(kstZone)
+                    localTime.hour in 6..22
                 }
-                val cond = fix(item.weather.firstOrNull()?.description ?: "맑음")
-                
-                val hourAqiKey = "${localTime.year}-${localTime.monthNumber.toString().padStart(2, '0')}-${localTime.dayOfMonth.toString().padStart(2, '0')} ${localTime.hour.toString().padStart(2, '0')}"
-                val hourAqi = simulatedHourlyAqiMap[hourAqiKey] ?: dayAqi
-                val hourPop = ((item.pop ?: 0.0) * 100).toInt()
-                
-                Logger.d("OWM pop mapped: dtTxt=${item.dtTxt}, rawPop=${item.pop}, calculated=$hourPop")
-                HourlyDetail(displayTime, item.main.temp, cond, aqi = hourAqi, precipitationProbability = hourPop)
-            }
+                .map { item ->
+                    val localTime = Instant.fromEpochSeconds(item.dt).toLocalDateTime(kstZone)
+                    val targetHour = localTime.hour
+                    val displayTime = "${targetHour.toString().padStart(2, '0')}시"
+                    val cond = fix(item.weather.firstOrNull()?.description ?: "맑음")
+                    
+                    val hourAqiKey = "${localTime.year}-${localTime.monthNumber.toString().padStart(2, '0')}-${localTime.dayOfMonth.toString().padStart(2, '0')} ${localTime.hour.toString().padStart(2, '0')}"
+                    val hourAqi = simulatedHourlyAqiMap[hourAqiKey] ?: dayAqi
+                    val hourPop = ((item.pop ?: 0.0) * 100).toInt()
+                    
+                    Logger.d("OWM pop mapped: dtTxt=${item.dtTxt}, rawPop=${item.pop}, calculated=$hourPop")
+                    HourlyDetail(displayTime, item.main.temp, cond, aqi = hourAqi, precipitationProbability = hourPop)
+                }
             
             DailyForecast(
                 date = dateKey,

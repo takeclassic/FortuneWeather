@@ -228,9 +228,13 @@ fun DailyForecastItem(item: DailyForecast) {
                             Spacer(modifier = Modifier.width(4.dp))
                             
                             // 3. 날씨 아이콘 (22dp)
+                            val isDetailNight = remember(detail.time) {
+                                val hr = detail.time.substringBefore("시").toIntOrNull() ?: 12
+                                hr < 6 || hr >= 20
+                            }
                             WeatherAnimation(
                                 condition = detail.condition,
-                                isNight = detail.time.contains("오후 8시") || detail.time.contains("오후 10시"),
+                                isNight = isDetailNight,
                                 animate = false,
                                 modifier = Modifier.size(22.dp)
                             )
