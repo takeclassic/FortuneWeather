@@ -51,6 +51,9 @@ kotlin {
                 
                 // Coroutines
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0")
+                
+                // Datetime
+                implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.5.0")
             }
         }
         val androidMain by getting {
@@ -58,7 +61,7 @@ kotlin {
                 implementation("androidx.activity:activity-compose:1.8.2")
                 implementation("androidx.appcompat:appcompat:1.6.1")
                 implementation("com.google.android.gms:play-services-ads:23.0.0")
-                implementation("com.google.android.gms:play-services-location:21.2.0")
+                implementation("com.google.android.gms:play-services-location:21.3.0")
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.0")
                 
                 // Lottie Android

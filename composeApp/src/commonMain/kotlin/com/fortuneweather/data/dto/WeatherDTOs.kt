@@ -17,7 +17,13 @@ data class OpenWeatherResponse(
 )
 
 @Serializable
-data class MainData(val temp: Double, val humidity: Int, val pressure: Double? = null)
+data class MainData(
+    val temp: Double,
+    val humidity: Int,
+    val pressure: Double? = null,
+    @SerialName("temp_min") val tempMin: Double? = null,
+    @SerialName("temp_max") val tempMax: Double? = null
+)
 
 @Serializable
 data class WeatherDescription(val main: String, val description: String? = null)
@@ -28,9 +34,6 @@ data class WindData(val speed: Double, val deg: Int)
 @Serializable
 data class SysData(val sunrise: Long, val sunset: Long)
 
-/**
- * WeatherAPI 응답 DTO (Forecast 포함 확장)
- */
 @Serializable
 data class WeatherApiResponse(
     val location: Location? = null,
@@ -46,6 +49,12 @@ data class Location(
 )
 
 @Serializable
+data class WeatherApiAirQuality(
+    val pm10: Double? = null,
+    @SerialName("pm2_5") val pm25: Double? = null
+)
+
+@Serializable
 data class CurrentWeather(
     @SerialName("temp_c") val tempC: Double,
     val humidity: Int,
@@ -53,7 +62,8 @@ data class CurrentWeather(
     @SerialName("uv") val uvIndex: Double? = null,
     @SerialName("vis_km") val visibilityKm: Double? = null,
     @SerialName("pressure_mb") val pressureMb: Double? = null,
-    @SerialName("wind_dir") val windDir: String? = null
+    @SerialName("wind_dir") val windDir: String? = null,
+    @SerialName("air_quality") val airQuality: WeatherApiAirQuality? = null
 )
 
 @Serializable
@@ -75,14 +85,20 @@ data class ForecastDay(
 data class DayInfo(
     @SerialName("maxtemp_c") val maxTemp: Double,
     @SerialName("mintemp_c") val minTemp: Double,
-    val condition: Condition
+    val condition: Condition,
+    @SerialName("daily_chance_of_rain") val dailyChanceOfRain: Int? = null,
+    @SerialName("daily_chance_of_snow") val dailyChanceOfSnow: Int? = null,
+    @SerialName("air_quality") val airQuality: WeatherApiAirQuality? = null
 )
 
 @Serializable
 data class HourInfo(
     val time: String,
     @SerialName("temp_c") val tempC: Double,
-    val condition: Condition
+    val condition: Condition,
+    @SerialName("chance_of_rain") val chanceOfRain: Int? = null,
+    @SerialName("chance_of_snow") val chanceOfSnow: Int? = null,
+    @SerialName("air_quality") val airQuality: WeatherApiAirQuality? = null
 )
 
 /**
@@ -97,7 +113,13 @@ data class KmaItems(val items: KmaItemList?)
 @Serializable
 data class KmaItemList(val item: List<KmaItem>)
 @Serializable
-data class KmaItem(val category: String, val fcstValue: String)
+data class KmaItem(
+    val category: String,
+    val fcstValue: String,
+    val fcstDate: String? = null,
+    val fcstTime: String? = null,
+    val obsrValue: String? = null // 초단기실황용 필드 추가
+)
 
 @Serializable
 data class AirKoreaResponse(val response: AirBody)
@@ -107,4 +129,71 @@ data class AirBody(val body: AirItems)
 data class AirItems(val items: List<AirItem>)
 @Serializable
 data class AirItem(val khaiValue: String)
+
+@Serializable
+data class OwmAirPollutionResponse(
+    val list: List<OwmAirPollutionItem>
+)
+
+@Serializable
+data class OwmAirPollutionItem(
+    val dt: Long,
+    val main: OwmAqi,
+    val components: OwmComponents
+)
+
+@Serializable
+data class OwmAqi(
+    val aqi: Int
+)
+
+@Serializable
+data class OwmComponents(
+    val pm10: Double,
+    @SerialName("pm2_5") val pm25: Double
+)
+
+@Serializable
+data class OwmForecastResponse(
+    val list: List<OwmForecastItem>
+)
+
+@Serializable
+data class OwmForecastItem(
+    val dt: Long,
+    val main: OwmForecastMain,
+    val weather: List<OwmForecastWeather>,
+    val pop: Double? = 0.0,
+    @SerialName("dt_txt") val dtTxt: String
+)
+
+@Serializable
+data class OwmForecastMain(
+    val temp: Double,
+    @SerialName("temp_min") val tempMin: Double,
+    @SerialName("temp_max") val tempMax: Double,
+    val humidity: Int
+)
+
+@Serializable
+data class OwmForecastWeather(
+    val main: String,
+    val description: String
+)
+
+
+@Serializable
+data class OpenMeteoForecastResponse(
+    val hourly: OmfHourly
+)
+
+@Serializable
+data class OmfHourly(
+    val time: List<String>,
+    @SerialName("temperature_2m") val temperature2m: List<Double>,
+    @SerialName("weather_code") val weatherCode: List<Int>
+)
+
+
+
 
