@@ -2,6 +2,10 @@ package com.fortuneweather.data.repository
 
 import com.fortuneweather.domain.model.WeatherInfo
 import com.fortuneweather.domain.model.RawWeatherData
+import com.fortuneweather.domain.model.HourlyForecast
+import com.fortuneweather.domain.model.DailyForecast
+import com.fortuneweather.domain.model.HourlyDetail
+import com.fortuneweather.domain.model.WeatherCache
 import com.fortuneweather.utils.LatLonToGrid
 import com.fortuneweather.utils.CoordinateConverter
 import com.fortuneweather.utils.Logger
@@ -21,11 +25,13 @@ import com.fortuneweather.utils.SunTimes
 import kotlinx.datetime.*
 import kotlin.math.*
 import kotlin.math.pow
+import com.fortuneweather.data.cache.CacheManager
 
 class WeatherRepository(private val client: HttpClient) {
 
     private val kmaServiceKey = BuildKonfig.KMA_SERVICE_KEY
     private val kstZone = TimeZone.of("Asia/Seoul")
+    private val cacheManager = CacheManager()
 
     private fun convertDegreeToDirection(deg: Double): String {
         val index = (((deg + 22.5) / 45.0).toInt()) % 8
@@ -33,15 +39,42 @@ class WeatherRepository(private val client: HttpClient) {
         return directions.getOrElse(index) { "북" }
     }
 
-    suspend fun getIntegratedWeather(lat: Double, lon: Double, customLocationName: String? = null): WeatherInfo = coroutineScope {
-        Logger.i("--- Weather Pipeline Triggered ---")
+    suspend fun getIntegratedWeather(
+        lat: Double,
+        lon: Double,
+        customLocationName: String? = null,
+        forceRefresh: Boolean = false
+    ): WeatherInfo = coroutineScope {
+        Logger.i("--- Weather Pipeline Triggered (forceRefresh=$forceRefresh) ---")
+        
+        if (!forceRefresh) {
+            try {
+                val cachedJson = cacheManager.getCache("weather_info_cache")
+                if (cachedJson != null) {
+                    val cache = Json.decodeFromString<WeatherCache>(cachedJson)
+                    val nowMillis = Clock.System.now().toEpochMilliseconds()
+                    val isExpired = nowMillis - cache.cachedTimeMillis > 2 * 60 * 60 * 1000 // 2시간
+                    val isSameLocation = abs(cache.lat - lat) < 0.01 && abs(cache.lon - lon) < 0.01
+                    
+                    if (!isExpired && isSameLocation) {
+                        Logger.i("--- Valid Weather Cache Returned (lat=$lat, lon=$lon) ---")
+                        return@coroutineScope cache.weatherInfo
+                    } else {
+                        Logger.i("--- Weather Cache Expired or Location Changed (isExpired=$isExpired, isSameLoc=$isSameLocation) ---")
+                    }
+                }
+            } catch (e: Exception) {
+                Logger.e("Failed to read weather cache", e)
+            }
+        } else {
+            Logger.i("--- Force Refresh Requested. Bypassing Cache. ---")
+        }
         
         val realtimeDef = async { fetchKmaRealtimeWeather(lat, lon) }
         val owmAirDef = async { fetchOwmAirPollutionForecast(lat, lon) }
         val stationDef = async { fetchNearestStation(lat, lon) }
 
         val owmAirList = owmAirDef.await()
-        val owmForecastDef = async { fetchOwmForecast(lat, lon, owmAirList) }
         val forecastDef = async { fetchKmaForecastWeather(lat, lon, owmAirList) }
         val realtime = realtimeDef.await()
         val forecastData = forecastDef.await()
@@ -49,7 +82,7 @@ class WeatherRepository(private val client: HttpClient) {
         val locationName = customLocationName ?: stationName
         
         val aqiDef = async { fetchAirKoreaDetails(stationName) }
-        val owmForecastList = owmForecastDef.await()
+        val owmForecastList = fetchOwmForecast(lat, lon, owmAirList, forecastData)
         val aqiData = aqiDef.await()
         
         val now = Clock.System.now().toLocalDateTime(kstZone)
@@ -94,7 +127,7 @@ class WeatherRepository(private val client: HttpClient) {
             finalTemp
         }
 
-        WeatherInfo(
+        val finalWeatherInfo = WeatherInfo(
             locationName = locationName, temp = finalTemp, feelsLike = feelsLikeVal, humidity = finalHumidity,
             condition = finalCondition, aqi = aqiVal, pm10 = pm10Val, pm25 = pm25Val, uvIndex = uvVal, 
             windDirection = realtime?.windDirection ?: forecastData?.windDirection ?: "북", 
@@ -105,6 +138,22 @@ class WeatherRepository(private val client: HttpClient) {
             luckyColor = calculateLuckyColor(finalTemp, finalCondition), fashionTip = getFashionRecommendation(finalTemp),
             fortuneMsg = "기상청 통합 예보가 업데이트되었습니다.", sourceCount = 3
         )
+        
+        try {
+            val cacheObj = WeatherCache(
+                weatherInfo = finalWeatherInfo,
+                cachedTimeMillis = Clock.System.now().toEpochMilliseconds(),
+                lat = lat,
+                lon = lon
+            )
+            val jsonStr = Json.encodeToString(WeatherCache.serializer(), cacheObj)
+            cacheManager.saveCache("weather_info_cache", jsonStr)
+            Logger.i("--- Weather Cache Successfully Saved ---")
+        } catch (e: Exception) {
+            Logger.e("Failed to save weather cache", e)
+        }
+        
+        finalWeatherInfo
     }
 
 
@@ -192,7 +241,7 @@ class WeatherRepository(private val client: HttpClient) {
             val sortedKeys = hourGroups.keys.filter { it.length >= 10 }.sorted().filter { it >= "${now.year}${now.monthNumber.toString().padStart(2, '0')}${now.dayOfMonth.toString().padStart(2, '0')}${now.hour.toString().padStart(2, '0')}00" }
             val hourly = sortedKeys.take(24).map { key ->
                 val group = hourGroups[key]!!; val hourInt = key.substring(8, 10).toInt()
-                val displayTime = if (hourInt < 12) "am ${if(hourInt == 0) 12 else hourInt}시" else "pm ${if(hourInt == 12) 12 else hourInt-12}시"
+                val displayTime = if (hourInt < 12) "오전 ${if(hourInt == 0) 12 else hourInt}시" else "오후 ${if(hourInt == 12) 12 else hourInt-12}시"
                 val sky = group.find { it.category == "SKY" }?.fcstValue ?: "1"; val pty = group.find { it.category == "PTY" }?.fcstValue ?: "0"
                 val pop = group.find { it.category == "POP" }?.fcstValue?.toIntOrNull() ?: 0
                 val pm10Val = owmAqiMap[key] ?: 0
@@ -303,7 +352,12 @@ class WeatherRepository(private val client: HttpClient) {
         null
     }
 
-    private suspend fun fetchOwmForecast(lat: Double, lon: Double, owmAirList: List<OwmAirPollutionItem>?): List<DailyForecast>? = try {
+    private suspend fun fetchOwmForecast(
+        lat: Double,
+        lon: Double,
+        owmAirList: List<OwmAirPollutionItem>?,
+        kmaForecast: RawWeatherData?
+    ): List<DailyForecast>? = try {
         val apiKey = BuildKonfig.OPENWEATHER_KEY
         val url = "http://api.openweathermap.org/data/2.5/forecast?lat=$lat&lon=$lon&appid=$apiKey&units=metric&lang=kr"
         val responseText = client.get(url).bodyAsText()
@@ -331,8 +385,8 @@ class WeatherRepository(private val client: HttpClient) {
             key to item.components.pm10.toInt()
         } ?: emptyMap()
         
-        val tomorrow = Clock.System.now().toLocalDateTime(kstZone).date.plus(1, DateTimeUnit.DAY)
-        val targetDates = (0..4).map { tomorrow.plus(it, DateTimeUnit.DAY) }
+        val today = Clock.System.now().toLocalDateTime(kstZone).date
+        val targetDates = (0..4).map { today.plus(it, DateTimeUnit.DAY) }
         
         targetDates.mapIndexedNotNull { index, localDate ->
             val dateStr = "${localDate.year}-${localDate.monthNumber.toString().padStart(2, '0')}-${localDate.dayOfMonth.toString().padStart(2, '0')}"
@@ -353,19 +407,33 @@ class WeatherRepository(private val client: HttpClient) {
             }
             val nonNullItems = dayItems
             
-            val dayOfWeek = when (localDate.dayOfWeek) {
-                DayOfWeek.MONDAY -> "월"
-                DayOfWeek.TUESDAY -> "화"
-                DayOfWeek.WEDNESDAY -> "수"
-                DayOfWeek.THURSDAY -> "목"
-                DayOfWeek.FRIDAY -> "금"
-                DayOfWeek.SATURDAY -> "토"
-                DayOfWeek.SUNDAY -> "일"
-                else -> "일"
+            val dayOfWeek = if (index == 0) {
+                "오늘"
+            } else {
+                when (localDate.dayOfWeek) {
+                    DayOfWeek.MONDAY -> "월"
+                    DayOfWeek.TUESDAY -> "화"
+                    DayOfWeek.WEDNESDAY -> "수"
+                    DayOfWeek.THURSDAY -> "목"
+                    DayOfWeek.FRIDAY -> "금"
+                    DayOfWeek.SATURDAY -> "토"
+                    DayOfWeek.SUNDAY -> "일"
+                    else -> "일"
+                }
             }
             
-            val minTemp = nonNullItems.minOf { it.main.tempMin }
-            val maxTemp = nonNullItems.maxOf { it.main.tempMax }
+            var minTemp = nonNullItems.minOf { it.main.tempMin }
+            var maxTemp = nonNullItems.maxOf { it.main.tempMax }
+            
+            // 오늘(index == 0)의 최저/최고 온도는 기상청 단기예보의 실측/예보 값을 신뢰하여 덮어씌움 (구조적 오차 치유)
+            if (index == 0 && kmaForecast != null) {
+                val kmaKey = "$month/$dayVal"
+                val kmaToday = kmaForecast.daily.firstOrNull { it.date == kmaKey }
+                if (kmaToday != null) {
+                    minTemp = kmaToday.minTemp
+                    maxTemp = kmaToday.maxTemp
+                }
+            }
             
             val pop = (nonNullItems.maxOfOrNull { it.pop ?: 0.0 } ?: 0.0) * 100
             val dayAqi = owmAqiMap[dateStr] ?: 0
@@ -390,24 +458,36 @@ class WeatherRepository(private val client: HttpClient) {
             val morningCond = morningItem?.weather?.firstOrNull()?.description?.let { fix(it) } ?: "맑음"
             val afternoonCond = afternoonItem?.weather?.firstOrNull()?.description?.let { fix(it) } ?: "맑음"
             
-            val hourlyDetails = nonNullItems
-                .filter { item ->
-                    val localTime = Instant.fromEpochSeconds(item.dt).toLocalDateTime(kstZone)
-                    localTime.hour in 6..22
+            val targetHours = listOf(6, 9, 12, 15, 18, 21, 24)
+            val hourlyDetails = targetHours.mapNotNull { targetHour ->
+                val itemHour = if (targetHour == 24) 0 else targetHour
+                
+                val targetDayItems = if (targetHour == 24) {
+                    val nextDate = localDate.plus(1, DateTimeUnit.DAY)
+                    val nextDateStr = "${nextDate.year}-${nextDate.monthNumber.toString().padStart(2, '0')}-${nextDate.dayOfMonth.toString().padStart(2, '0')}"
+                    groups[nextDateStr] ?: nonNullItems
+                } else {
+                    nonNullItems
                 }
-                .map { item ->
+                
+                val matchItem = targetDayItems.firstOrNull { item ->
                     val localTime = Instant.fromEpochSeconds(item.dt).toLocalDateTime(kstZone)
-                    val targetHour = localTime.hour
-                    val displayTime = "${targetHour.toString().padStart(2, '0')}시"
-                    val cond = fix(item.weather.firstOrNull()?.description ?: "맑음")
-                    
-                    val hourAqiKey = "${localTime.year}-${localTime.monthNumber.toString().padStart(2, '0')}-${localTime.dayOfMonth.toString().padStart(2, '0')} ${localTime.hour.toString().padStart(2, '0')}"
-                    val hourAqi = simulatedHourlyAqiMap[hourAqiKey] ?: dayAqi
-                    val hourPop = ((item.pop ?: 0.0) * 100).toInt()
-                    
-                    Logger.d("OWM pop mapped: dtTxt=${item.dtTxt}, rawPop=${item.pop}, calculated=$hourPop")
-                    HourlyDetail(displayTime, item.main.temp, cond, aqi = hourAqi, precipitationProbability = hourPop)
-                }
+                    localTime.hour == itemHour
+                } ?: targetDayItems.minByOrNull { item ->
+                    val localTime = Instant.fromEpochSeconds(item.dt).toLocalDateTime(kstZone)
+                    abs(localTime.hour - itemHour)
+                } ?: return@mapNotNull null
+                
+                val localTime = Instant.fromEpochSeconds(matchItem.dt).toLocalDateTime(kstZone)
+                val displayTime = "${targetHour.toString().padStart(2, '0')}시"
+                val cond = fix(matchItem.weather.firstOrNull()?.description ?: "맑음")
+                
+                val hourAqiKey = "${localTime.year}-${localTime.monthNumber.toString().padStart(2, '0')}-${localTime.dayOfMonth.toString().padStart(2, '0')} ${localTime.hour.toString().padStart(2, '0')}"
+                val hourAqi = simulatedHourlyAqiMap[hourAqiKey] ?: dayAqi
+                val hourPop = ((matchItem.pop ?: 0.0) * 100).toInt()
+                
+                HourlyDetail(displayTime, matchItem.main.temp, cond, aqi = hourAqi, precipitationProbability = hourPop)
+            }
             
             DailyForecast(
                 date = dateKey,

@@ -33,6 +33,7 @@ import com.fortuneweather.ui.components.WeatherAnimation
 import com.fortuneweather.ui.theme.*
 import kotlinx.coroutines.launch
 import kotlinx.datetime.*
+import androidx.compose.ui.layout.onGloballyPositioned
 
 @OptIn(ExperimentalMaterialApi::class)
 @Composable
@@ -202,32 +203,32 @@ fun DailyForecastItem(item: DailyForecast) {
                                 .padding(vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // 1. 시간 (고정 폭 55dp로 어긋남 방지)
+                            // 1. 시간 (폭을 42dp로 단축하여 강수확률과의 간격을 줄임)
                             Text(
                                 text = detail.time,
                                 color = WhiteTrans80,
-                                fontSize = 11.sp,
-                                modifier = Modifier.width(55.dp)
+                                fontSize = 13.sp,
+                                modifier = Modifier.width(42.dp)
                             )
                             
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(2.dp))
                             
-                            // 2. 강수확률 (고정 폭 40dp로 어긋남 방지)
+                            // 2. 강수확률 (폭을 45dp로 정밀 조정하여 콤팩트하게 밀착시킴)
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.width(40.dp)
+                                modifier = Modifier.width(45.dp)
                             ) {
-                                Text(text = "💧", fontSize = 9.sp, modifier = Modifier.padding(end = 2.dp))
+                                Text(text = "💧", fontSize = 11.sp, modifier = Modifier.padding(end = 2.dp))
                                 Text(
                                     text = "${detail.precipitationProbability}%",
                                     color = WhiteTrans80,
-                                    fontSize = 11.sp
+                                    fontSize = 13.sp
                                 )
                             }
                             
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             
-                            // 3. 날씨 아이콘 (22dp)
+                            // 3. 날씨 아이콘 (32dp로 유지하고 애니메이션 활성화)
                             val isDetailNight = remember(detail.time) {
                                 val hr = detail.time.substringBefore("시").toIntOrNull() ?: 12
                                 hr < 6 || hr >= 20
@@ -235,13 +236,13 @@ fun DailyForecastItem(item: DailyForecast) {
                             WeatherAnimation(
                                 condition = detail.condition,
                                 isNight = isDetailNight,
-                                animate = false,
-                                modifier = Modifier.size(22.dp)
+                                animate = true,
+                                modifier = Modifier.size(32.dp)
                             )
                             
-                            Spacer(modifier = Modifier.width(10.dp))
+                            Spacer(modifier = Modifier.width(12.dp))
                             
-                            // 4. 기온 게이지 영역 (우측 끝까지 쭉 뻗은 트랙)
+                            // 4. 기온 게이지 영역 (높이 24dp, 캡슐 폭 32dp, 폰트 11sp로 조정하여 슬라이딩 가용 범위 확보)
                             BoxWithConstraints(
                                 modifier = Modifier
                                     .weight(1f)
@@ -249,7 +250,7 @@ fun DailyForecastItem(item: DailyForecast) {
                                     .align(Alignment.CenterVertically)
                                     .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(12.dp))
                             ) {
-                                val capsuleWidth = 36.dp
+                                val capsuleWidth = 32.dp
                                 val maxTravel = maxWidth - capsuleWidth
                                 val currentOffset = maxTravel * animRatio.value
                                 
@@ -291,8 +292,8 @@ fun HourlyForecastSection(info: WeatherInfo) {
             items(info.hourly) { item ->
                 val isItemNight = remember(item.time) {
                     try {
-                        val isPm = item.time.contains("pm")
-                        val rawHour = item.time.substringAfter(if (isPm) "pm " else "am ").substringBefore("시").trim().toInt()
+                        val isPm = item.time.contains("오후")
+                        val rawHour = item.time.substringAfter(if (isPm) "오후 " else "오전 ").substringBefore("시").trim().toInt()
                         val hour = if (isPm) {
                             if (rawHour == 12) 12 else rawHour + 12
                         } else {
@@ -429,17 +430,26 @@ fun WeatherDetailGrid(info: WeatherInfo) {
 
 @Composable
 fun SunriseSunsetCard(sunrise: String, sunset: String, nowHour: Int, modifier: Modifier = Modifier) {
+    var isVisible by remember { mutableStateOf(false) }
+    
     Card(
         shape = RoundedCornerShape(16.dp),
         backgroundColor = WhiteTrans10,
         elevation = 0.dp,
-        modifier = modifier.fillMaxWidth()
+        modifier = modifier
+            .fillMaxWidth()
+            .onGloballyPositioned { coordinates ->
+                val positionInWindow = coordinates.localToWindow(androidx.compose.ui.geometry.Offset.Zero).y
+                val parentHeight = coordinates.parentLayoutCoordinates?.size?.height ?: 2000
+                if (positionInWindow > 0 && positionInWindow < parentHeight) {
+                    isVisible = true
+                }
+            }
     ) {
         Column(modifier = Modifier.padding(18.dp)) {
             Text("☀️ 일출 및 일몰", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(16.dp))
             
-            // 가로 너비를 짧게 줄이고, 포물선 각(높이)을 높이기 위해 padding(horizontal = 48.dp)과 height(100.dp)를 적용
             BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -453,7 +463,31 @@ fun SunriseSunsetCard(sunrise: String, sunset: String, nowHour: Int, modifier: M
                 val widthDp = with(density) { constraints.maxWidth.toDp() }
                 val heightDp = with(density) { constraints.maxHeight.toDp() }
                 
-                // 1. 궤적 그리는 Canvas (가파른 돔 모양 포물선 점선 아크)
+                // 2. 태양 위치 비율 계산 및 애니메이션 적용 (실제 뷰포트에 감지되어 보일 때 스르륵 이동)
+                val targetT = remember(nowHour) {
+                    val isDaytime = nowHour in 6..19
+                    if (isDaytime) {
+                        ((nowHour - 6).toFloat() / 13f).coerceIn(0f, 1f) 
+                    } else {
+                        1f // 일몰 이후(밤)에는 끝지점(1.0f)까지 이동
+                    }
+                }
+                
+                val animT = remember { androidx.compose.animation.core.Animatable(0f) }
+                LaunchedEffect(isVisible, targetT) {
+                    if (isVisible) {
+                        kotlinx.coroutines.delay(1000) // 1초 대기 후 애니메이션 시작
+                        animT.animateTo(
+                            targetValue = targetT,
+                            animationSpec = androidx.compose.animation.core.tween(
+                                durationMillis = 1500,
+                                easing = androidx.compose.animation.core.LinearOutSlowInEasing
+                            )
+                        )
+                    }
+                }
+                
+                // 1. 궤적 그리는 Canvas (가파른 돔 모양 포물선 점선 아크 - 태양 이동에 맞춰 사르륵 밝아짐)
                 androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
                     // 지평선
                     drawLine(
@@ -468,9 +502,10 @@ fun SunriseSunsetCard(sunrise: String, sunset: String, nowHour: Int, modifier: M
                         moveTo(0f, heightPx)
                         quadraticBezierTo(widthPx / 2, 0f, widthPx, heightPx)
                     }
+                    val pathAlpha = 0.15f * (if (targetT > 0f) animT.value / targetT else 1f)
                     drawPath(
                         path = path,
-                        color = Color.White.copy(alpha = 0.15f),
+                        color = Color.White.copy(alpha = pathAlpha),
                         style = androidx.compose.ui.graphics.drawscope.Stroke(
                             width = 3f,
                             pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
@@ -478,19 +513,12 @@ fun SunriseSunsetCard(sunrise: String, sunset: String, nowHour: Int, modifier: M
                     )
                 }
                 
-                // 2. 태양 위치 비율 계산
-                val t = when {
-                    nowHour < 6 -> 0f       
-                    nowHour >= 20 -> 1f     
-                    else -> ((nowHour - 6).toFloat() / 13f).coerceIn(0f, 1f) 
-                }
-                
                 val isDaytime = nowHour in 6..19
                 val alphaVal = if (isDaytime) 1f else 0.4f 
                 val emojiSize = 34.dp
                 
-                // 이차 베지에 곡선상 Dp 좌표 산출
-                val tF = t
+                // 이차 베지에 곡선상 Dp 좌표 산출 (애니메이션 적용된 animT.value 기준)
+                val tF = animT.value
                 val sunXDp = (1 - tF) * (1 - tF) * 0f + 2 * (1 - tF) * tF * (widthDp.value / 2) + tF * tF * widthDp.value
                 val sunYDp = (1 - tF) * (1 - tF) * heightDp.value + 2 * (1 - tF) * tF * 0f + tF * tF * heightDp.value
                 

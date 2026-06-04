@@ -71,3 +71,11 @@ data class RawWeatherData(
     val windSpeed: Double = 0.0,
     val rainAmount: Double = 0.0
 )
+
+@Serializable
+data class WeatherCache(
+    val weatherInfo: WeatherInfo,
+    val cachedTimeMillis: Long,
+    val lat: Double,
+    val lon: Double
+)

@@ -53,6 +53,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        com.fortuneweather.data.cache.AppContext.context = this.applicationContext
         Logger.i("Application Started")
         MobileAds.initialize(this) {}
 
@@ -67,7 +68,7 @@ class MainActivity : ComponentActivity() {
                 val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
                 val scope = rememberCoroutineScope()
 
-                suspend fun loadWeather(location: Location?) {
+                suspend fun loadWeather(location: Location?, forceRefresh: Boolean = false) {
                     if (location == null) {
                         Logger.e("Location is Null")
                         errorState = "현재 위치를 확인할 수 없습니다."
@@ -75,7 +76,7 @@ class MainActivity : ComponentActivity() {
                     }
                     try {
                         errorState = null
-                        val weatherDeferred = scope.async { repository.getIntegratedWeather(location.latitude, location.longitude, null) }
+                        val weatherDeferred = scope.async { repository.getIntegratedWeather(location.latitude, location.longitude, null, forceRefresh = forceRefresh) }
                         val addressDeferred = scope.async(Dispatchers.IO) { getAddressName(context, location.latitude, location.longitude) }
                         val info = weatherDeferred.await()
                         val address = addressDeferred.await()
@@ -102,7 +103,7 @@ class MainActivity : ComponentActivity() {
 
                 val handleRefreshAction = {
                     if (hasLocationPermission(context)) {
-                        scope.launch { isRefreshing = true; loadWeather(getCurrentLocation(fusedLocationClient)); isRefreshing = false }
+                        scope.launch { isRefreshing = true; loadWeather(getCurrentLocation(fusedLocationClient), forceRefresh = true); isRefreshing = false }
                     } else {
                         locationPermissionLauncher.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
                     }
