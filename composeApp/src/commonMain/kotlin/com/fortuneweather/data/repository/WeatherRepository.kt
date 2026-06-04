@@ -424,19 +424,7 @@ class WeatherRepository(private val client: HttpClient) {
             
             var minTemp = nonNullItems.minOf { it.main.tempMin }
             var maxTemp = nonNullItems.maxOf { it.main.tempMax }
-            
-            // 오늘(index == 0)의 최저/최고 온도는 기상청 단기예보의 실측/예보 값을 신뢰하여 덮어씌움 (구조적 오차 치유)
-            if (index == 0 && kmaForecast != null) {
-                val kmaKey = "$month/$dayVal"
-                val kmaToday = kmaForecast.daily.firstOrNull { it.date == kmaKey }
-                if (kmaToday != null) {
-                    minTemp = kmaToday.minTemp
-                    maxTemp = kmaToday.maxTemp
-                }
-            }
-            
-            val pop = (nonNullItems.maxOfOrNull { it.pop ?: 0.0 } ?: 0.0) * 100
-            val dayAqi = owmAqiMap[dateStr] ?: 0
+            var pop = (nonNullItems.maxOfOrNull { it.pop ?: 0.0 } ?: 0.0) * 100
             
             val morningItem = nonNullItems.minByOrNull { item ->
                 val localTime = Instant.fromEpochSeconds(item.dt).toLocalDateTime(kstZone)
@@ -455,38 +443,88 @@ class WeatherRepository(private val client: HttpClient) {
                 else -> "맑음"
             }
             
-            val morningCond = morningItem?.weather?.firstOrNull()?.description?.let { fix(it) } ?: "맑음"
-            val afternoonCond = afternoonItem?.weather?.firstOrNull()?.description?.let { fix(it) } ?: "맑음"
+            var morningCond = morningItem?.weather?.firstOrNull()?.description?.let { fix(it) } ?: "맑음"
+            var afternoonCond = afternoonItem?.weather?.firstOrNull()?.description?.let { fix(it) } ?: "맑음"
+            
+            // 오늘(index == 0)의 모든 요약 데이터는 기상청 단기예보 데이터를 신뢰하여 덮어씌움 (데이터 소스 불일치 해결)
+            if (index == 0 && kmaForecast != null) {
+                val kmaKey = "$month/$dayVal"
+                val kmaToday = kmaForecast.daily.firstOrNull { it.date == kmaKey }
+                if (kmaToday != null) {
+                    minTemp = kmaToday.minTemp
+                    maxTemp = kmaToday.maxTemp
+                    pop = kmaToday.precipitationProbability.toDouble()
+                    morningCond = kmaToday.morningCondition
+                    afternoonCond = kmaToday.afternoonCondition
+                }
+            }
+            
+            val dayAqi = owmAqiMap[dateStr] ?: 0
             
             val targetHours = listOf(6, 9, 12, 15, 18, 21, 24)
-            val hourlyDetails = targetHours.mapNotNull { targetHour ->
-                val itemHour = if (targetHour == 24) 0 else targetHour
-                
-                val targetDayItems = if (targetHour == 24) {
-                    val nextDate = localDate.plus(1, DateTimeUnit.DAY)
-                    val nextDateStr = "${nextDate.year}-${nextDate.monthNumber.toString().padStart(2, '0')}-${nextDate.dayOfMonth.toString().padStart(2, '0')}"
-                    groups[nextDateStr] ?: nonNullItems
-                } else {
-                    nonNullItems
+            val hourlyDetails = if (index == 0 && kmaForecast != null) {
+                targetHours.mapNotNull { targetHour ->
+                    val itemHour = if (targetHour == 24) 0 else targetHour
+                    
+                    val matchKma = kmaForecast.hourly.firstOrNull { item ->
+                        val isPm = item.time.contains("오후")
+                        val rawHour = item.time.substringAfter(if (isPm) "오후 " else "오전 ").substringBefore("시").trim().toIntOrNull() ?: 12
+                        val hourInt = if (isPm) {
+                            if (rawHour == 12) 12 else rawHour + 12
+                        } else {
+                            if (rawHour == 12) 0 else rawHour
+                        }
+                        hourInt == itemHour
+                    } ?: kmaForecast.hourly.minByOrNull { item ->
+                        val isPm = item.time.contains("오후")
+                        val rawHour = item.time.substringAfter(if (isPm) "오후 " else "오전 ").substringBefore("시").trim().toIntOrNull() ?: 12
+                        val hourInt = if (isPm) {
+                            if (rawHour == 12) 12 else rawHour + 12
+                        } else {
+                            if (rawHour == 12) 0 else rawHour
+                        }
+                        abs(hourInt - itemHour)
+                    } ?: return@mapNotNull null
+                    
+                    val displayTime = "${targetHour.toString().padStart(2, '0')}시"
+                    HourlyDetail(
+                        time = displayTime,
+                        temp = matchKma.temp,
+                        condition = matchKma.condition,
+                        aqi = matchKma.aqi,
+                        precipitationProbability = matchKma.precipitationProbability
+                    )
                 }
-                
-                val matchItem = targetDayItems.firstOrNull { item ->
-                    val localTime = Instant.fromEpochSeconds(item.dt).toLocalDateTime(kstZone)
-                    localTime.hour == itemHour
-                } ?: targetDayItems.minByOrNull { item ->
-                    val localTime = Instant.fromEpochSeconds(item.dt).toLocalDateTime(kstZone)
-                    abs(localTime.hour - itemHour)
-                } ?: return@mapNotNull null
-                
-                val localTime = Instant.fromEpochSeconds(matchItem.dt).toLocalDateTime(kstZone)
-                val displayTime = "${targetHour.toString().padStart(2, '0')}시"
-                val cond = fix(matchItem.weather.firstOrNull()?.description ?: "맑음")
-                
-                val hourAqiKey = "${localTime.year}-${localTime.monthNumber.toString().padStart(2, '0')}-${localTime.dayOfMonth.toString().padStart(2, '0')} ${localTime.hour.toString().padStart(2, '0')}"
-                val hourAqi = simulatedHourlyAqiMap[hourAqiKey] ?: dayAqi
-                val hourPop = ((matchItem.pop ?: 0.0) * 100).toInt()
-                
-                HourlyDetail(displayTime, matchItem.main.temp, cond, aqi = hourAqi, precipitationProbability = hourPop)
+            } else {
+                targetHours.mapNotNull { targetHour ->
+                    val itemHour = if (targetHour == 24) 0 else targetHour
+                    
+                    val targetDayItems = if (targetHour == 24) {
+                        val nextDate = localDate.plus(1, DateTimeUnit.DAY)
+                        val nextDateStr = "${nextDate.year}-${nextDate.monthNumber.toString().padStart(2, '0')}-${nextDate.dayOfMonth.toString().padStart(2, '0')}"
+                        groups[nextDateStr] ?: nonNullItems
+                    } else {
+                        nonNullItems
+                    }
+                    
+                    val matchItem = targetDayItems.firstOrNull { item ->
+                        val localTime = Instant.fromEpochSeconds(item.dt).toLocalDateTime(kstZone)
+                        localTime.hour == itemHour
+                    } ?: targetDayItems.minByOrNull { item ->
+                        val localTime = Instant.fromEpochSeconds(item.dt).toLocalDateTime(kstZone)
+                        abs(localTime.hour - itemHour)
+                    } ?: return@mapNotNull null
+                    
+                    val localTime = Instant.fromEpochSeconds(matchItem.dt).toLocalDateTime(kstZone)
+                    val displayTime = "${targetHour.toString().padStart(2, '0')}시"
+                    val cond = fix(matchItem.weather.firstOrNull()?.description ?: "맑음")
+                    
+                    val hourAqiKey = "${localTime.year}-${localTime.monthNumber.toString().padStart(2, '0')}-${localTime.dayOfMonth.toString().padStart(2, '0')} ${localTime.hour.toString().padStart(2, '0')}"
+                    val hourAqi = simulatedHourlyAqiMap[hourAqiKey] ?: dayAqi
+                    val hourPop = ((matchItem.pop ?: 0.0) * 100).toInt()
+                    
+                    HourlyDetail(displayTime, matchItem.main.temp, cond, aqi = hourAqi, precipitationProbability = hourPop)
+                }
             }
             
             DailyForecast(
