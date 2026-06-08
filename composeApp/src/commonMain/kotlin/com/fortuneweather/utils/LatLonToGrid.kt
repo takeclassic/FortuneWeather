@@ -18,24 +18,24 @@ object LatLonToGrid {
     data class GridResult(val nx: Int, val ny: Int)
 
     fun convert(lat: Double, lon: Double): GridResult {
-        val DEGRAD = PI / 180.0
+        val degToRad = PI / 180.0
         
         val re = RE / GRID
-        val slat1 = SLAT1 * DEGRAD
-        val slat2 = SLAT2 * DEGRAD
-        val olon = OLON * DEGRAD
-        val olat = OLAT * DEGRAD
+        val slat1 = SLAT1 * degToRad
+        val slat2 = SLAT2 * degToRad
+        val olon = OLON * degToRad
+        val olat = OLAT * degToRad
 
         var sn = tan(PI * 0.25 + slat2 * 0.5) / tan(PI * 0.25 + slat1 * 0.5)
-        sn = log10(cos(slat1) / cos(slat2)) / log10(sn)
+        sn = ln(cos(slat1) / cos(slat2)) / ln(sn)
         var sf = tan(PI * 0.25 + slat1 * 0.5)
         sf = sf.pow(sn) * cos(slat1) / sn
         var ro = tan(PI * 0.25 + olat * 0.5)
         ro = re * sf / ro.pow(sn)
         
-        var ra = tan(PI * 0.25 + lat * DEGRAD * 0.5)
+        var ra = tan(PI * 0.25 + lat * degToRad * 0.5)
         ra = re * sf / ra.pow(sn)
-        var theta = lon * DEGRAD - olon
+        var theta = lon * degToRad - olon
         if (theta > PI) theta -= 2.0 * PI
         if (theta < -PI) theta += 2.0 * PI
         theta *= sn

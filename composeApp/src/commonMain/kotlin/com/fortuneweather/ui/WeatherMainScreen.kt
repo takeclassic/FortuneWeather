@@ -1,9 +1,10 @@
 package com.fortuneweather.ui
 
 import androidx.compose.animation.*
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearOutSlowInEasing
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -19,12 +20,17 @@ import androidx.compose.material.pullrefresh.rememberPullRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.fortuneweather.domain.model.*
@@ -33,7 +39,19 @@ import com.fortuneweather.ui.components.WeatherAnimation
 import com.fortuneweather.ui.theme.*
 import kotlinx.coroutines.launch
 import kotlinx.datetime.*
-import androidx.compose.ui.layout.onGloballyPositioned
+
+private fun aqiClassification(aqi: Int): Pair<String, Color> = when {
+    aqi <= 30 -> "좋음" to Color(0xFF4CAF50)
+    aqi <= 80 -> "보통" to Color(0xFFFFC107)
+    aqi <= 150 -> "나쁨" to Color(0xFFFF9800)
+    else -> "매우나쁨" to Color(0xFFF44336)
+}
+
+private fun isNightTime(sunrise: String, sunset: String, hour: Int): Boolean {
+    val sunriseHour = sunrise.substringBefore(":").toIntOrNull() ?: 6
+    val sunsetHour = sunset.substringBefore(":").toIntOrNull() ?: 18
+    return hour < sunriseHour || hour >= sunsetHour
+}
 
 @OptIn(ExperimentalMaterialApi::class)
 @Composable
@@ -44,18 +62,8 @@ fun WeatherApp(weatherInfo: WeatherInfo, isRefreshing: Boolean, onRefresh: () ->
     val pullRefreshState = rememberPullRefreshState(isRefreshing, onRefresh)
 
     val isNight = remember(weatherInfo) {
-        try {
-            val now = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
-            val currentInMin = now.hour * 60 + now.minute
-            val sunriseParts = (weatherInfo.sunrise ?: "06:30").split(":")
-            val sunsetParts = (weatherInfo.sunset ?: "19:00").split(":")
-            val sunriseInMin = sunriseParts[0].toInt() * 60 + sunriseParts[1].toInt()
-            val sunsetInMin = sunsetParts[0].toInt() * 60 + sunsetParts[1].toInt()
-            currentInMin < sunriseInMin || currentInMin > sunsetInMin
-        } catch (e: Exception) {
-            val hour = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).hour
-            hour < 6 || hour > 18
-        }
+        val hour = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).hour
+        isNightTime(weatherInfo.sunrise, weatherInfo.sunset, hour)
     }
 
     FortuneWeatherTheme {
@@ -121,12 +129,7 @@ fun DailyForecastItem(item: DailyForecast) {
                 }
                 
                 // 3. 미세먼지 등급 표기
-                val (aqiText, aqiColor) = when {
-                    item.aqi <= 30 -> "좋음" to AqiGood
-                    item.aqi <= 80 -> "보통" to AqiModerate
-                    item.aqi <= 150 -> "나쁨" to AqiBad
-                    else -> "매우나쁨" to AqiVeryBad
-                }
+                val (aqiText, aqiColor) = aqiClassification(item.aqi)
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.width(50.dp)) {
                     Text(text = "😷", fontSize = 9.sp, modifier = Modifier.padding(end = 1.dp))
                     Text(text = aqiText, color = aqiColor, fontSize = 9.sp, fontWeight = FontWeight.Bold)
@@ -174,12 +177,12 @@ fun DailyForecastItem(item: DailyForecast) {
                         val ratio = ((detail.temp - tempBase) / tempRange).toFloat().coerceIn(0f, 1f)
                         
                         // 2. 가로 폭 차오르는 애니메이션 적용 (Animatable & LaunchedEffect 이용)
-                        val animRatio = remember { androidx.compose.animation.core.Animatable(0f) }
+                        val animRatio = remember { Animatable(0f) }
                         LaunchedEffect(isExpanded) {
                             if (isExpanded) {
                                 animRatio.animateTo(
                                     targetValue = ratio,
-                                    animationSpec = androidx.compose.animation.core.tween(durationMillis = 800, easing = androidx.compose.animation.core.LinearOutSlowInEasing)
+                                    animationSpec = tween(durationMillis = 800, easing = LinearOutSlowInEasing)
                                 )
                             } else {
                                 animRatio.snapTo(0f)
@@ -316,12 +319,7 @@ fun HourlyForecastSection(info: WeatherInfo) {
                         Text(text = "${item.precipitationProbability}%", color = WhiteTrans80, fontSize = 9.sp, style = MaterialTheme.typography.caption)
                     }
                     Spacer(modifier = Modifier.height(2.dp))
-                    val (aqiText, aqiColor) = when {
-                        item.aqi <= 30 -> "좋음" to AqiGood
-                        item.aqi <= 80 -> "보통" to AqiModerate
-                        item.aqi <= 150 -> "나쁨" to AqiBad
-                        else -> "매우나쁨" to AqiVeryBad
-                    }
+                    val (aqiText, aqiColor) = aqiClassification(item.aqi)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(text = "😷", fontSize = 8.sp, modifier = Modifier.padding(end = 2.dp))
                         Text(text = "$aqiText(${item.aqi})", color = aqiColor, fontSize = 8.sp, fontWeight = FontWeight.Bold)
@@ -342,12 +340,7 @@ fun CurrentWeatherSection(info: WeatherInfo, isNight: Boolean) {
         Text("${info.temp.toInt()}°", style = MaterialTheme.typography.h1, color = Color.White)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("미세먼지 ", style = MaterialTheme.typography.body2, color = WhiteTrans80)
-            val (text, color) = when {
-                info.aqi <= 30 -> "좋음" to AqiGood
-                info.aqi <= 80 -> "보통" to AqiModerate
-                info.aqi <= 150 -> "나쁨" to AqiBad
-                else -> "매우나쁨" to AqiVeryBad
-            }
+            val (text, color) = aqiClassification(info.aqi)
             Text("$text(${info.aqi})", color = color, style = MaterialTheme.typography.body1)
         }
     }
@@ -439,7 +432,7 @@ fun SunriseSunsetCard(sunrise: String, sunset: String, nowHour: Int, modifier: M
         modifier = modifier
             .fillMaxWidth()
             .onGloballyPositioned { coordinates ->
-                val positionInWindow = coordinates.localToWindow(androidx.compose.ui.geometry.Offset.Zero).y
+                val positionInWindow = coordinates.localToWindow(Offset.Zero).y
                 val parentHeight = coordinates.parentLayoutCoordinates?.size?.height ?: 2000
                 if (positionInWindow > 0 && positionInWindow < parentHeight) {
                     isVisible = true
@@ -473,32 +466,32 @@ fun SunriseSunsetCard(sunrise: String, sunset: String, nowHour: Int, modifier: M
                     }
                 }
                 
-                val animT = remember { androidx.compose.animation.core.Animatable(0f) }
+                val animT = remember { Animatable(0f) }
                 LaunchedEffect(isVisible, targetT) {
                     if (isVisible) {
                         kotlinx.coroutines.delay(1000) // 1초 대기 후 애니메이션 시작
                         animT.animateTo(
                             targetValue = targetT,
-                            animationSpec = androidx.compose.animation.core.tween(
+                            animationSpec = tween(
                                 durationMillis = 1500,
-                                easing = androidx.compose.animation.core.LinearOutSlowInEasing
+                                easing = LinearOutSlowInEasing
                             )
                         )
                     }
                 }
                 
                 // 1. 궤적 그리는 Canvas (가파른 돔 모양 포물선 점선 아크 - 태양 이동에 맞춰 사르륵 밝아짐)
-                androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
                     // 지평선
                     drawLine(
                         color = Color.White.copy(alpha = 0.2f),
-                        start = androidx.compose.ui.geometry.Offset(0f, heightPx),
-                        end = androidx.compose.ui.geometry.Offset(widthPx, heightPx),
+                        start = Offset(0f, heightPx),
+                        end = Offset(widthPx, heightPx),
                         strokeWidth = 2f
                     )
                     
                     // 태양 궤적 (반원보다 더 솟은 돔형 아크)
-                    val path = androidx.compose.ui.graphics.Path().apply {
+                    val path = Path().apply {
                         moveTo(0f, heightPx)
                         quadraticBezierTo(widthPx / 2, 0f, widthPx, heightPx)
                     }
@@ -506,9 +499,9 @@ fun SunriseSunsetCard(sunrise: String, sunset: String, nowHour: Int, modifier: M
                     drawPath(
                         path = path,
                         color = Color.White.copy(alpha = pathAlpha),
-                        style = androidx.compose.ui.graphics.drawscope.Stroke(
+                        style = Stroke(
                             width = 3f,
-                            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
                         )
                     )
                 }

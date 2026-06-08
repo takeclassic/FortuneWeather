@@ -3,57 +3,54 @@ package com.fortuneweather.utils
 import kotlinx.datetime.LocalDate
 import kotlin.math.*
 
-/**
- * 위도, 경도 및 날짜를 기반으로 일출/일몰 시간을 계산하는 유틸리티
- */
 object SunTimes {
-    fun calculateSunriseSunset(lat: Double, lon: Double, date: LocalDate): Pair<String, String> {
+    // 천문 상수
+    private const val EARTH_AXIAL_TILT = 23.45
+    private const val ZENITH_ANGLE = -0.833 // 대기 굴절 보정 (도)
+    private const val KST_REFERENCE_LONGITUDE = 135.0 // UTC+9 기준 경도
+    private const val MINUTES_PER_DEGREE = 4.0
+    private const val DEGREES_PER_HOUR = 15.0
+    private const val DAYS_IN_YEAR = 365.0
+    private const val EOT_DAYS_IN_YEAR = 364.0
+    private const val EOT_OFFSET = 81
+    private const val DECLINATION_OFFSET = 284
+
+    data class SunriseSunset(val sunrise: String, val sunset: String)
+
+    fun calculate(lat: Double, lon: Double, date: LocalDate): SunriseSunset {
         val dayOfYear = date.dayOfYear
+        val degToRad = PI / 180.0
 
-        // 태양 적위 (declination) 계산 (라디안)
-        val declination = 23.45 * sin(2 * PI * (284 + dayOfYear) / 365.0)
-        val declinationRad = declination * PI / 180.0
-        val latRad = lat * PI / 180.0
+        val declination = EARTH_AXIAL_TILT * sin(2 * PI * (DECLINATION_OFFSET + dayOfYear) / DAYS_IN_YEAR)
+        val declinationRad = declination * degToRad
+        val latRad = lat * degToRad
 
-        // -0.833도 = 태양이 지평선 아래로 내려가는 각도 (대기 굴절 등 고려)
-        val zenith = -0.833 * PI / 180.0
-        val cosH = (sin(zenith) - sin(latRad) * sin(declinationRad)) / (cos(latRad) * cos(declinationRad))
+        val zenithRad = ZENITH_ANGLE * degToRad
+        val cosH = (sin(zenithRad) - sin(latRad) * sin(declinationRad)) / (cos(latRad) * cos(declinationRad))
 
-        // 극야 또는 백야 처리
-        if (cosH > 1.0) {
-            return Pair("06:00", "18:00") // 태양이 뜨지 않는 경우 기본값
-        } else if (cosH < -1.0) {
-            return Pair("05:00", "20:00") // 태양이 지지 않는 경우 기본값
-        }
+        // 극지방 예외 처리
+        if (cosH > 1.0) return SunriseSunset("06:00", "18:00")
+        if (cosH < -1.0) return SunriseSunset("05:00", "20:00")
 
-        val hRad = acos(cosH)
-        val hDeg = hRad * 180.0 / PI
+        val hDeg = acos(cosH) * 180.0 / PI
 
-        // 균시차 (Equation of Time) 계산 (분 단위)
-        val b = 2 * PI * (dayOfYear - 81) / 364.0
+        val b = 2 * PI * (dayOfYear - EOT_OFFSET) / EOT_DAYS_IN_YEAR
         val eot = 9.87 * sin(2 * b) - 7.53 * cos(b) - 1.5 * sin(b)
 
-        // 경도 보정: 대한민국 표준시는 동경 135도 (UTC+9) 기준
-        val longitudeCorrection = (lon - 135.0) * 4.0
-
-        // 남중 시간 (Local Solar Noon) = 12시 - (경도 보정 + 균시차) / 60
+        val longitudeCorrection = (lon - KST_REFERENCE_LONGITUDE) * MINUTES_PER_DEGREE
         val solarNoon = 12.0 - (longitudeCorrection + eot) / 60.0
-
-        // H를 시간 단위로 변환 (15도 = 1시간)
-        val transitOffset = hDeg / 15.0
+        val transitOffset = hDeg / DEGREES_PER_HOUR
 
         val sunriseHour = solarNoon - transitOffset
         val sunsetHour = solarNoon + transitOffset
 
-        fun formatHour(hour: Double): String {
-            val totalMinutes = (hour * 60).roundToInt()
-            val h = (totalMinutes / 60) % 24
-            val m = totalMinutes % 60
-            val cleanH = if (h < 0) h + 24 else h
-            val cleanM = if (m < 0) m + 60 else m
-            return "${cleanH.toString().padStart(2, '0')}:${cleanM.toString().padStart(2, '0')}"
-        }
+        return SunriseSunset(formatHour(sunriseHour), formatHour(sunsetHour))
+    }
 
-        return Pair(formatHour(sunriseHour), formatHour(sunsetHour))
+    private fun formatHour(hour: Double): String {
+        val totalMinutes = (hour * 60).roundToInt()
+        val h = ((totalMinutes / 60) % 24).let { if (it < 0) it + 24 else it }
+        val m = (totalMinutes % 60).let { if (it < 0) it + 60 else it }
+        return "${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}"
     }
 }

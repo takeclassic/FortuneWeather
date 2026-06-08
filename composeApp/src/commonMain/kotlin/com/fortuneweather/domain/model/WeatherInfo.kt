@@ -1,23 +1,15 @@
 package com.fortuneweather.domain.model
 
 import kotlinx.serialization.Serializable
+import com.fortuneweather.utils.WeatherConstants
 
 @Serializable
 data class HourlyForecast(
     val time: String,
     val temp: Double,
-    val condition: String,
-    val precipitationProbability: Int, // 시간별 강수확률 추가
-    val aqi: Int = 0 // 시간별 미세먼지 수치 추가
-)
-
-@Serializable
-data class HourlyDetail(
-    val time: String,
-    val temp: Double,
-    val condition: String,
-    val aqi: Int = 0,
-    val precipitationProbability: Int = 0
+    val condition: String = WeatherConstants.NO_DATA,
+    val precipitationProbability: Int = 0,
+    val aqi: Int = 0
 )
 
 @Serializable
@@ -25,12 +17,12 @@ data class DailyForecast(
     val date: String,
     val dayOfWeek: String,
     val precipitationProbability: Int,
-    val morningCondition: String,
-    val afternoonCondition: String,
+    val morningCondition: String = WeatherConstants.NO_DATA,
+    val afternoonCondition: String = WeatherConstants.NO_DATA,
     val minTemp: Double,
     val maxTemp: Double,
     val aqi: Int = 0,
-    val hourlyDetails: List<HourlyDetail> = emptyList()
+    val hourlyDetails: List<HourlyForecast> = emptyList()
 )
 
 @Serializable
@@ -61,21 +53,32 @@ data class WeatherInfo(
 )
 
 data class RawWeatherData(
-    val temp: Double,
-    val humidity: Int,
-    val condition: String,
-    val locationName: String? = null,
+    val temp: Double = WeatherConstants.TEMP_UNKNOWN,
+    val humidity: Int = WeatherConstants.INT_UNKNOWN,
+    val condition: String = WeatherConstants.NO_DATA,
+    val locationName: String = WeatherConstants.NO_DATA,
     val hourly: List<HourlyForecast> = emptyList(),
     val daily: List<DailyForecast> = emptyList(),
-    val windDirection: String? = null,
-    val windSpeed: Double = 0.0,
-    val rainAmount: Double = 0.0
+    val windDirection: String = WeatherConstants.NO_DATA,
+    val windSpeed: Double = WeatherConstants.DOUBLE_UNKNOWN,
+    val rainAmount: Double = WeatherConstants.DOUBLE_UNKNOWN
 )
 
-@Serializable
 data class WeatherCache(
     val weatherInfo: WeatherInfo,
     val cachedTimeMillis: Long,
     val lat: Double,
     val lon: Double
+)
+
+data class OwmForecastResult(
+    val dailyList: List<DailyForecast> = emptyList(),
+    val hourlyList: List<HourlyForecast> = emptyList(),
+    val currentTemp: Double = WeatherConstants.TEMP_UNKNOWN,
+    val currentCondition: String = WeatherConstants.NO_DATA,
+    val currentHumidity: Int = WeatherConstants.INT_UNKNOWN,
+    val currentWindSpeed: Double = WeatherConstants.DOUBLE_UNKNOWN,
+    val currentWindDeg: Double = WeatherConstants.DOUBLE_UNKNOWN,
+    val currentRain: Double = WeatherConstants.DOUBLE_UNKNOWN,
+    val cityName: String = WeatherConstants.NO_DATA
 )

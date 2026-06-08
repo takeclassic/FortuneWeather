@@ -2,13 +2,10 @@ package com.fortuneweather
 
 import android.Manifest
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Geocoder
 import android.location.Location
-import android.net.Uri
 import android.os.Bundle
-import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -62,7 +59,7 @@ class MainActivity : ComponentActivity() {
                 var weatherState by remember { mutableStateOf<WeatherInfo?>(null) }
                 var isRefreshing by remember { mutableStateOf(false) }
                 var errorState by remember { mutableStateOf<String?>(null) }
-                var isPermanentlyDenied by remember { mutableStateOf(false) }
+
 
                 val context = this
                 val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
@@ -76,7 +73,7 @@ class MainActivity : ComponentActivity() {
                     }
                     try {
                         errorState = null
-                        val weatherDeferred = scope.async { repository.getIntegratedWeather(location.latitude, location.longitude, null, forceRefresh = forceRefresh) }
+                        val weatherDeferred = scope.async { repository.getIntegratedWeather(location.latitude, location.longitude, forceRefresh = forceRefresh) }
                         val addressDeferred = scope.async(Dispatchers.IO) { getAddressName(context, location.latitude, location.longitude) }
                         val info = weatherDeferred.await()
                         val address = addressDeferred.await()
@@ -127,9 +124,32 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun hasLocationPermission(context: Context): Boolean = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-    private suspend fun getCurrentLocation(client: FusedLocationProviderClient): Location? = try { client.lastLocation.await() ?: client.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null).await() } catch (e: Exception) { null }
-    private fun getAddressName(context: Context, lat: Double, lon: Double): String? = try { val addresses = Geocoder(context, Locale.KOREA).getFromLocation(lat, lon, 1); if (!addresses.isNullOrEmpty()) { val addr = addresses!![0]; "${addr.locality ?: ""} ${addr.subLocality ?: ""}".trim() } else null } catch (e: Exception) { null }
+    private fun hasLocationPermission(context: Context): Boolean {
+        return ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private suspend fun getCurrentLocation(client: FusedLocationProviderClient): Location? {
+        return try {
+            client.lastLocation.await()
+                ?: client.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null).await()
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun getAddressName(context: Context, lat: Double, lon: Double): String? {
+        return try {
+            val addresses = Geocoder(context, Locale.KOREA).getFromLocation(lat, lon, 1)
+            addresses?.firstOrNull()?.let { addr ->
+                "${addr.locality ?: ""} ${addr.subLocality ?: ""}".trim()
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
 }
 
 @Composable
