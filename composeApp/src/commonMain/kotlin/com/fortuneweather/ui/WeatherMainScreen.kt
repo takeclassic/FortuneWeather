@@ -1,5 +1,6 @@
 package com.fortuneweather.ui
 
+import android.annotation.SuppressLint
 import androidx.compose.animation.*
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearOutSlowInEasing
@@ -8,15 +9,14 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.*
-import androidx.compose.material.pullrefresh.PullRefreshIndicator
-import androidx.compose.material.pullrefresh.pullRefresh
-import androidx.compose.material.pullrefresh.rememberPullRefreshState
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,7 +37,7 @@ import com.fortuneweather.domain.model.*
 import com.fortuneweather.ui.components.AdBanner
 import com.fortuneweather.ui.components.WeatherAnimation
 import com.fortuneweather.ui.theme.*
-import kotlinx.coroutines.launch
+
 import kotlinx.datetime.*
 
 private fun aqiClassification(aqi: Int): Pair<String, Color> = when {
@@ -53,13 +53,12 @@ private fun isNightTime(sunrise: String, sunset: String, hour: Int): Boolean {
     return hour < sunriseHour || hour >= sunsetHour
 }
 
-@OptIn(ExperimentalMaterialApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WeatherApp(weatherInfo: WeatherInfo, isRefreshing: Boolean, onRefresh: () -> Unit) {
-    val sheetState = rememberModalBottomSheetState(initialValue = ModalBottomSheetValue.Hidden)
+    val sheetState = rememberModalBottomSheetState()
     var sheetType by remember { mutableStateOf("fortune") }
-    val scope = rememberCoroutineScope()
-    val pullRefreshState = rememberPullRefreshState(isRefreshing, onRefresh)
+    var showBottomSheet by remember { mutableStateOf(false) }
 
     val isNight = remember(weatherInfo) {
         val hour = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).hour
@@ -67,31 +66,36 @@ fun WeatherApp(weatherInfo: WeatherInfo, isRefreshing: Boolean, onRefresh: () ->
     }
 
     FortuneWeatherTheme {
-        ModalBottomSheetLayout(
-            sheetState = sheetState,
-            sheetShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-            sheetContent = { BottomSheetContent(sheetType, weatherInfo) }
+        val backgroundColors = if (isNight) listOf(NightDeepBlue, NightBlackBlue) else listOf(SunnyLight, SunnyDark)
+        Box(
+            modifier = Modifier.fillMaxSize().background(brush = Brush.verticalGradient(colors = backgroundColors))
         ) {
-            val backgroundColors = if (isNight) listOf(NightDeepBlue, NightBlackBlue) else listOf(SunnyLight, SunnyDark)
-            Box(modifier = Modifier.fillMaxSize().background(brush = Brush.verticalGradient(colors = backgroundColors)).pullRefresh(pullRefreshState)) {
-                Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
-                    Spacer(modifier = Modifier.height(60.dp))
-                    CurrentWeatherSection(weatherInfo, isNight)
-                    Spacer(modifier = Modifier.height(24.dp))
-                    ActionButtons(onFortuneClick = { sheetType = "fortune"; scope.launch { sheetState.show() } }, onFashionClick = { sheetType = "fashion"; scope.launch { sheetState.show() } })
-                    Spacer(modifier = Modifier.height(32.dp))
-                    SectionTitle("24시간 예보")
-                    HourlyForecastSection(weatherInfo)
-                    Spacer(modifier = Modifier.height(30.dp))
-                    SectionTitle("5일간의 날씨")
-                    DailyForecastSection(weatherInfo)
-                    Spacer(modifier = Modifier.height(30.dp))
-                    SectionTitle("상세 정보")
-                    WeatherDetailGrid(weatherInfo)
-                    Spacer(modifier = Modifier.height(80.dp))
-                }
-                PullRefreshIndicator(refreshing = isRefreshing, state = pullRefreshState, modifier = Modifier.align(Alignment.TopCenter), backgroundColor = Color.White, contentColor = SunnyDark)
-                AdBanner(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(50.dp).background(Color.White))
+            Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
+                Spacer(modifier = Modifier.height(60.dp))
+                CurrentWeatherSection(weatherInfo, isNight)
+                Spacer(modifier = Modifier.height(24.dp))
+                ActionButtons(onFortuneClick = { sheetType = "fortune"; showBottomSheet = true }, onFashionClick = { sheetType = "fashion"; showBottomSheet = true })
+                Spacer(modifier = Modifier.height(32.dp))
+                SectionTitle("24시간 예보")
+                HourlyForecastSection(weatherInfo)
+                Spacer(modifier = Modifier.height(30.dp))
+                SectionTitle("5일간의 날씨")
+                DailyForecastSection(weatherInfo)
+                Spacer(modifier = Modifier.height(30.dp))
+                SectionTitle("상세 정보")
+                WeatherDetailGrid(weatherInfo)
+                Spacer(modifier = Modifier.height(80.dp))
+            }
+            AdBanner(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(50.dp).background(Color.White))
+        }
+
+        if (showBottomSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showBottomSheet = false },
+                sheetState = sheetState,
+                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+            ) {
+                BottomSheetContent(sheetType, weatherInfo)
             }
         }
     }
@@ -99,16 +103,17 @@ fun WeatherApp(weatherInfo: WeatherInfo, isRefreshing: Boolean, onRefresh: () ->
 
 @Composable
 fun DailyForecastSection(info: WeatherInfo) {
-    Card(shape = RoundedCornerShape(16.dp), backgroundColor = WhiteTrans15, elevation = 0.dp, modifier = Modifier.fillMaxWidth()) {
+    Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = WhiteTrans15), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp), modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             info.daily.forEach { item ->
                 DailyForecastItem(item)
-                if (info.daily.last() != item) Divider(color = WhiteTrans10, thickness = 0.5.dp)
+                if (info.daily.last() != item) HorizontalDivider(color = WhiteTrans10, thickness = 0.5.dp)
             }
         }
     }
 }
 
+@SuppressLint("UnusedBoxWithConstraintsScope")
 @Composable
 fun DailyForecastItem(item: DailyForecast) {
     var isExpanded by remember { mutableStateOf(false) }
@@ -116,16 +121,16 @@ fun DailyForecastItem(item: DailyForecast) {
     Column(modifier = Modifier.fillMaxWidth().animateContentSize().clickable { isExpanded = !isExpanded }) {
         Row(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             // 1. 요일
-            Text(text = item.dayOfWeek, color = Color.White, style = MaterialTheme.typography.body1, modifier = Modifier.width(42.dp), fontWeight = FontWeight.Normal)
+            Text(text = item.dayOfWeek, color = Color.White, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.width(42.dp), fontWeight = FontWeight.Normal)
             
             if (item.morningCondition == "데이터 준비중") {
                 Spacer(modifier = Modifier.weight(1f))
-                Text("정보를 불러오는 중입니다...", color = WhiteTrans80, style = MaterialTheme.typography.caption, modifier = Modifier.weight(3f))
+                Text("정보를 불러오는 중입니다...", color = WhiteTrans80, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(3f))
             } else {
                 // 2. 강수확률
                 Row(modifier = Modifier.width(50.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(text = "💧", fontSize = 10.sp, modifier = Modifier.padding(end = 2.dp))
-                    Text(text = "${item.precipitationProbability}%", color = WhiteTrans80, style = MaterialTheme.typography.caption)
+                    Text(text = "${item.precipitationProbability}%", color = WhiteTrans80, style = MaterialTheme.typography.bodySmall)
                 }
                 
                 // 3. 미세먼지 등급 표기
@@ -146,9 +151,9 @@ fun DailyForecastItem(item: DailyForecast) {
                 
                 // 5. 온도 및 맨 우측 화살표 아이콘
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.End) {
-                    Text(text = "${item.minTemp.toInt()}°", color = WhiteTrans80, style = MaterialTheme.typography.body1)
+                    Text(text = "${item.minTemp.toInt()}°", color = WhiteTrans80, style = MaterialTheme.typography.bodyLarge)
                     Spacer(modifier = Modifier.width(10.dp))
-                    Text(text = "${item.maxTemp.toInt()}°", color = Color.White, style = MaterialTheme.typography.body1, fontWeight = FontWeight.Bold)
+                    Text(text = "${item.maxTemp.toInt()}°", color = Color.White, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.width(12.dp))
                     Text(
                         text = if (isExpanded) "▲" else "▼",
@@ -290,7 +295,7 @@ fun DailyForecastItem(item: DailyForecast) {
 
 @Composable
 fun HourlyForecastSection(info: WeatherInfo) {
-    Card(shape = RoundedCornerShape(16.dp), backgroundColor = WhiteTrans10, elevation = 0.dp, modifier = Modifier.fillMaxWidth().wrapContentHeight()) {
+    Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = WhiteTrans10), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp), modifier = Modifier.fillMaxWidth().wrapContentHeight()) {
         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             items(info.hourly) { item ->
                 val isItemNight = remember(item.time) {
@@ -308,15 +313,15 @@ fun HourlyForecastSection(info: WeatherInfo) {
                     }
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(48.dp)) {
-                    Text(text = item.time, color = WhiteTrans80, fontSize = 10.sp, style = MaterialTheme.typography.caption)
+                    Text(text = item.time, color = WhiteTrans80, fontSize = 10.sp, style = MaterialTheme.typography.bodySmall)
                     Spacer(modifier = Modifier.height(8.dp))
                     WeatherAnimation(condition = item.condition, isNight = isItemNight, animate = true, modifier = Modifier.size(30.dp))
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("${item.temp.toInt()}°", color = Color.White, style = MaterialTheme.typography.h4)
+                    Text("${item.temp.toInt()}°", color = Color.White, style = MaterialTheme.typography.headlineSmall)
                     Spacer(modifier = Modifier.height(2.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(text = "💧", fontSize = 8.sp, modifier = Modifier.padding(end = 2.dp))
-                        Text(text = "${item.precipitationProbability}%", color = WhiteTrans80, fontSize = 9.sp, style = MaterialTheme.typography.caption)
+                        Text(text = "${item.precipitationProbability}%", color = WhiteTrans80, fontSize = 9.sp, style = MaterialTheme.typography.bodySmall)
                     }
                     Spacer(modifier = Modifier.height(2.dp))
                     val (aqiText, aqiColor) = aqiClassification(item.aqi)
@@ -333,15 +338,15 @@ fun HourlyForecastSection(info: WeatherInfo) {
 @Composable
 fun CurrentWeatherSection(info: WeatherInfo, isNight: Boolean) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-        Text(info.locationName, style = MaterialTheme.typography.h3, color = WhiteTrans80)
+        Text(info.locationName, style = MaterialTheme.typography.headlineMedium, color = WhiteTrans80)
         Spacer(modifier = Modifier.height(8.dp))
         WeatherAnimation(condition = info.condition, isNight = isNight, animate = true, modifier = Modifier.size(180.dp))
-        Text(info.condition, style = MaterialTheme.typography.h2, color = Color.White)
-        Text("${info.temp.toInt()}°", style = MaterialTheme.typography.h1, color = Color.White)
+        Text(info.condition, style = MaterialTheme.typography.headlineLarge, color = Color.White)
+        Text("${info.temp.toInt()}°", style = MaterialTheme.typography.displayLarge, color = Color.White)
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("미세먼지 ", style = MaterialTheme.typography.body2, color = WhiteTrans80)
+            Text("미세먼지 ", style = MaterialTheme.typography.bodyMedium, color = WhiteTrans80)
             val (text, color) = aqiClassification(info.aqi)
-            Text("$text(${info.aqi})", color = color, style = MaterialTheme.typography.body1)
+            Text("$text(${info.aqi})", color = color, style = MaterialTheme.typography.bodyLarge)
         }
     }
 }
@@ -421,14 +426,15 @@ fun WeatherDetailGrid(info: WeatherInfo) {
     }
 }
 
+@SuppressLint("UnusedBoxWithConstraintsScope")
 @Composable
 fun SunriseSunsetCard(sunrise: String, sunset: String, nowHour: Int, modifier: Modifier = Modifier) {
     var isVisible by remember { mutableStateOf(false) }
     
     Card(
         shape = RoundedCornerShape(16.dp),
-        backgroundColor = WhiteTrans10,
-        elevation = 0.dp,
+        colors = CardDefaults.cardColors(containerColor = WhiteTrans10),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         modifier = modifier
             .fillMaxWidth()
             .onGloballyPositioned { coordinates ->
@@ -562,8 +568,8 @@ fun MoonPhaseCard(phase: Double, modifier: Modifier = Modifier) {
     
     Card(
         shape = RoundedCornerShape(16.dp),
-        backgroundColor = WhiteTrans10,
-        elevation = 0.dp,
+        colors = CardDefaults.cardColors(containerColor = WhiteTrans10),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         modifier = modifier.fillMaxWidth()
     ) {
         Row(
@@ -598,8 +604,8 @@ fun AirQualityDetailCard(pm10: Int, pm25: Int, modifier: Modifier = Modifier) {
     
     Card(
         shape = RoundedCornerShape(16.dp),
-        backgroundColor = WhiteTrans10,
-        elevation = 0.dp,
+        colors = CardDefaults.cardColors(containerColor = WhiteTrans10),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         modifier = modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(18.dp)) {
@@ -640,8 +646,8 @@ fun DetailRowCard(
 ) {
     Card(
         shape = RoundedCornerShape(16.dp),
-        backgroundColor = WhiteTrans10,
-        elevation = 0.dp,
+        colors = CardDefaults.cardColors(containerColor = WhiteTrans10),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         modifier = modifier.fillMaxWidth()
     ) {
         Row(
@@ -666,11 +672,11 @@ fun DetailRowCard(
 @Composable
 fun ActionButtons(onFortuneClick: () -> Unit, onFashionClick: () -> Unit, modifier: Modifier = Modifier) {
     Row(modifier = modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        Button(onClick = onFortuneClick, shape = RoundedCornerShape(50), colors = ButtonDefaults.buttonColors(backgroundColor = FortuneGold), modifier = Modifier.weight(1f).height(50.dp)) {
-            Text("🔮 오늘의 운세", style = MaterialTheme.typography.button)
+        Button(onClick = onFortuneClick, shape = RoundedCornerShape(50), colors = ButtonDefaults.buttonColors(containerColor = FortuneGold), modifier = Modifier.weight(1f).height(50.dp)) {
+            Text("🔮 오늘의 운세", style = MaterialTheme.typography.labelLarge)
         }
-        Button(onClick = onFashionClick, shape = RoundedCornerShape(50), colors = ButtonDefaults.buttonColors(backgroundColor = FashionGreen), modifier = Modifier.weight(1f).height(50.dp)) {
-            Text("👕 코디 추천", style = MaterialTheme.typography.button)
+        Button(onClick = onFashionClick, shape = RoundedCornerShape(50), colors = ButtonDefaults.buttonColors(containerColor = FashionGreen), modifier = Modifier.weight(1f).height(50.dp)) {
+            Text("👕 코디 추천", style = MaterialTheme.typography.labelLarge)
         }
     }
 }
@@ -678,15 +684,15 @@ fun ActionButtons(onFortuneClick: () -> Unit, onFashionClick: () -> Unit, modifi
 @Composable
 fun BottomSheetContent(type: String, info: WeatherInfo) {
     Column(modifier = Modifier.fillMaxWidth().padding(32.dp)) {
-        Text(if (type == "fortune") "🔮 오늘의 운세" else "👕 오늘 뭐 입지?", style = MaterialTheme.typography.h3)
+        Text(if (type == "fortune") "🔮 오늘의 운세" else "👕 오늘 뭐 입지?", style = MaterialTheme.typography.headlineMedium)
         Spacer(modifier = Modifier.height(16.dp))
-        Text(if (type == "fortune") info.fortuneMsg else info.fashionTip, style = MaterialTheme.typography.body1)
+        Text(if (type == "fortune") info.fortuneMsg else info.fashionTip, style = MaterialTheme.typography.bodyLarge)
         if (type == "fortune") {
             Spacer(modifier = Modifier.height(16.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("행운의 컬러: ", style = MaterialTheme.typography.body1, fontWeight = FontWeight.Bold)
+                Text("행운의 컬러: ", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
                 Box(Modifier.size(24.dp).background(FortuneGold, RoundedCornerShape(4.dp)))
-                Text(" ${info.luckyColor}", style = MaterialTheme.typography.body1)
+                Text(" ${info.luckyColor}", style = MaterialTheme.typography.bodyLarge)
             }
         }
         Spacer(modifier = Modifier.height(40.dp))
@@ -695,5 +701,5 @@ fun BottomSheetContent(type: String, info: WeatherInfo) {
 
 @Composable
 fun SectionTitle(title: String) {
-    Text(title, color = Color.White, style = MaterialTheme.typography.h4, modifier = Modifier.padding(vertical = 12.dp))
+    Text(title, color = Color.White, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(vertical = 12.dp))
 }

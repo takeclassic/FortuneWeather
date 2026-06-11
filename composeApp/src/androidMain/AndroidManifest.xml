@@ -6,6 +6,7 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <application
+        android:name=".FortuneWeatherApplication"
         android:allowBackup="true"
         android:icon="@android:mipmap/sym_def_app_icon"
         android:label="FortuneWeather"

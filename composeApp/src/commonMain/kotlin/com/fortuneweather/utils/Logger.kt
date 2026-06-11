@@ -2,10 +2,10 @@ package com.fortuneweather.utils
 
 /**
  * 앱 전용 정밀 로깅 시스템
- * Logcat 필터에 'FW_TRACER'를 입력하세요.
+ * Logcat 필터에 'weatherlog'를 입력하세요.
  */
 object Logger {
-    private const val TAG = "FW_TRACER"
+    private const val TAG = "WeatherLog"
 
     fun d(message: String) {
         println("$TAG [DEBUG] => $message")

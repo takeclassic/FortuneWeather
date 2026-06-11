@@ -6,7 +6,7 @@ object AppContext {
     lateinit var context: Context
 }
 
-actual class CacheManager actual constructor() {
+actual object CacheManager {
     private val prefs by lazy {
         AppContext.context.getSharedPreferences("fortune_weather_prefs", Context.MODE_PRIVATE)
     }

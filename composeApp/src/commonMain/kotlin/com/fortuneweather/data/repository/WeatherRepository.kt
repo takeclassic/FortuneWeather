@@ -10,23 +10,27 @@ import com.fortuneweather.domain.model.WeatherInfo
 import com.fortuneweather.utils.Logger
 import com.fortuneweather.utils.SunTimes
 import com.fortuneweather.utils.WeatherConstants
-import io.ktor.client.*
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.datetime.*
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
 import kotlin.math.abs
 import kotlin.math.pow
 
+/**
+ * 날씨 데이터를 통합하는 Repository.
+ * DataSource는 외부(AppContainer)에서 주입받으며, 직접 생성하지 않는다.
+ */
 class WeatherRepository(
-    private val client: HttpClient,
-    private val kmaDataSource: KmaWeatherDataSource = KmaWeatherDataSource(client),
-    private val airKoreaDataSource: AirKoreaDataSource = AirKoreaDataSource(client),
-    private val owmDataSource: OwmWeatherDataSource = OwmWeatherDataSource(client)
+    private val kmaDataSource: KmaWeatherDataSource,
+    private val airKoreaDataSource: AirKoreaDataSource,
+    private val owmDataSource: OwmWeatherDataSource
 ) {
 
     private val systemZone = TimeZone.currentSystemDefault()
-    private val cacheManager = CacheManager()
+    private val cacheManager = CacheManager
     private val json = Json { ignoreUnknownKeys = true }
 
     private companion object {
@@ -78,7 +82,7 @@ class WeatherRepository(
                 lat = lat,
                 lon = lon
             )
-            val jsonStr = json.encodeToString(WeatherCache.serializer(), cacheObj)
+            val jsonStr = json.encodeToString(cacheObj)
             cacheManager.saveCache("weather_info_cache", jsonStr)
             Logger.i("--- Weather Cache Successfully Saved ---")
         } catch (e: Exception) {
