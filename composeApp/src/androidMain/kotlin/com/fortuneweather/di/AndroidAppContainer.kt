@@ -4,6 +4,7 @@ import android.content.Context
 import com.fortuneweather.data.datasource.AirKoreaDataSource
 import com.fortuneweather.data.datasource.KmaWeatherDataSource
 import com.fortuneweather.data.datasource.OwmWeatherDataSource
+import com.fortuneweather.data.datasource.GeminiSajuDataSource
 import com.fortuneweather.data.repository.WeatherRepository
 import com.fortuneweather.domain.location.LocationTracker
 import com.fortuneweather.location.AndroidLocationTracker
@@ -34,11 +35,13 @@ class AndroidAppContainer(context: Context) : AppContainer {
     private val kmaDataSource = KmaWeatherDataSource(httpClient)
     private val airKoreaDataSource = AirKoreaDataSource(httpClient)
     private val owmDataSource = OwmWeatherDataSource(httpClient)
+    private val geminiSajuDataSource = GeminiSajuDataSource(httpClient)
 
     override val weatherRepository: WeatherRepository = WeatherRepository(
         kmaDataSource = kmaDataSource,
         airKoreaDataSource = airKoreaDataSource,
-        owmDataSource = owmDataSource
+        owmDataSource = owmDataSource,
+        geminiSajuDataSource = geminiSajuDataSource
     )
 
     override val locationTracker: LocationTracker = AndroidLocationTracker(

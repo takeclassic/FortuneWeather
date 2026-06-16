@@ -37,44 +37,76 @@ import com.fortuneweather.domain.model.*
 import com.fortuneweather.ui.components.AdBanner
 import com.fortuneweather.ui.components.WeatherAnimation
 import com.fortuneweather.ui.theme.*
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 
 import kotlinx.datetime.*
 
-private fun aqiClassification(aqi: Int): Pair<String, Color> = when {
-    aqi <= 30 -> "좋음" to Color(0xFF4CAF50)
-    aqi <= 80 -> "보통" to Color(0xFFFFC107)
-    aqi <= 150 -> "나쁨" to Color(0xFFFF9800)
-    else -> "매우나쁨" to Color(0xFFF44336)
+private fun aqiClassification(aqi: Int): Triple<String, Color, String> = when {
+    aqi <= 30 -> Triple("좋음", Color(0xFF4CAF50), "😊")
+    aqi <= 80 -> Triple("보통", Color(0xFFFFC107), "😐")
+    aqi <= 150 -> Triple("나쁨", Color(0xFFFF9800), "😷")
+    else -> Triple("매우나쁨", Color(0xFFF44336), "🤢")
 }
 
-private fun isNightTime(sunrise: String, sunset: String, hour: Int): Boolean {
+private fun isNightTime(sunrise: String, sunset: String, now: LocalDateTime): Boolean {
+    val currentInMin = now.hour * 60 + now.minute
     val sunriseHour = sunrise.substringBefore(":").toIntOrNull() ?: 6
+    val sunriseMin = sunrise.substringAfter(":").toIntOrNull() ?: 0
     val sunsetHour = sunset.substringBefore(":").toIntOrNull() ?: 18
-    return hour < sunriseHour || hour >= sunsetHour
+    val sunsetMin = sunset.substringAfter(":").toIntOrNull() ?: 0
+
+    val sunriseInMin = sunriseHour * 60 + sunriseMin
+    val sunsetInMin = sunsetHour * 60 + sunsetMin
+
+    return currentInMin < sunriseInMin || currentInMin >= sunsetInMin
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun WeatherApp(weatherInfo: WeatherInfo, isRefreshing: Boolean, onRefresh: () -> Unit) {
+fun WeatherApp(
+    weatherInfo: WeatherInfo,
+    isRefreshing: Boolean,
+    onRefresh: () -> Unit,
+    onFortuneClick: () -> Unit
+) {
     val sheetState = rememberModalBottomSheetState()
     var sheetType by remember { mutableStateOf("fortune") }
     var showBottomSheet by remember { mutableStateOf(false) }
 
     val isNight = remember(weatherInfo) {
-        val hour = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).hour
-        isNightTime(weatherInfo.sunrise, weatherInfo.sunset, hour)
+        val now = Clock.System.now().toLocalDateTime(TimeZone.of("Asia/Seoul"))
+        isNightTime(weatherInfo.sunrise, weatherInfo.sunset, now)
+    }
+
+    val pullToRefreshState = rememberPullToRefreshState()
+    if (pullToRefreshState.isRefreshing) {
+        LaunchedEffect(true) {
+            onRefresh()
+        }
+    }
+    LaunchedEffect(isRefreshing) {
+        if (isRefreshing) {
+            pullToRefreshState.startRefresh()
+        } else {
+            pullToRefreshState.endRefresh()
+        }
     }
 
     FortuneWeatherTheme {
         val backgroundColors = if (isNight) listOf(NightDeepBlue, NightBlackBlue) else listOf(SunnyLight, SunnyDark)
         Box(
-            modifier = Modifier.fillMaxSize().background(brush = Brush.verticalGradient(colors = backgroundColors))
+            modifier = Modifier
+                .fillMaxSize()
+                .background(brush = Brush.verticalGradient(colors = backgroundColors))
+                .nestedScroll(pullToRefreshState.nestedScrollConnection)
         ) {
             Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
                 Spacer(modifier = Modifier.height(60.dp))
                 CurrentWeatherSection(weatherInfo, isNight)
                 Spacer(modifier = Modifier.height(24.dp))
-                ActionButtons(onFortuneClick = { sheetType = "fortune"; showBottomSheet = true }, onFashionClick = { sheetType = "fashion"; showBottomSheet = true })
+                ActionButtons(onFortuneClick = onFortuneClick, onFashionClick = { sheetType = "fashion"; showBottomSheet = true })
                 Spacer(modifier = Modifier.height(32.dp))
                 SectionTitle("24시간 예보")
                 HourlyForecastSection(weatherInfo)
@@ -86,6 +118,12 @@ fun WeatherApp(weatherInfo: WeatherInfo, isRefreshing: Boolean, onRefresh: () ->
                 WeatherDetailGrid(weatherInfo)
                 Spacer(modifier = Modifier.height(80.dp))
             }
+            PullToRefreshContainer(
+                state = pullToRefreshState,
+                modifier = Modifier.align(Alignment.TopCenter),
+                containerColor = Color.White,
+                contentColor = SunnyDark
+            )
             AdBanner(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(50.dp).background(Color.White))
         }
 
@@ -134,9 +172,9 @@ fun DailyForecastItem(item: DailyForecast) {
                 }
                 
                 // 3. 미세먼지 등급 표기
-                val (aqiText, aqiColor) = aqiClassification(item.aqi)
+                val (aqiText, aqiColor, aqiEmoji) = aqiClassification(item.aqi)
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.width(50.dp)) {
-                    Text(text = "😷", fontSize = 9.sp, modifier = Modifier.padding(end = 1.dp))
+                    Text(text = aqiEmoji, fontSize = 9.sp, modifier = Modifier.padding(end = 1.dp))
                     Text(text = aqiText, color = aqiColor, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 }
                 
@@ -324,9 +362,9 @@ fun HourlyForecastSection(info: WeatherInfo) {
                         Text(text = "${item.precipitationProbability}%", color = WhiteTrans80, fontSize = 9.sp, style = MaterialTheme.typography.bodySmall)
                     }
                     Spacer(modifier = Modifier.height(2.dp))
-                    val (aqiText, aqiColor) = aqiClassification(item.aqi)
+                    val (aqiText, aqiColor, aqiEmoji) = aqiClassification(item.aqi)
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = "😷", fontSize = 8.sp, modifier = Modifier.padding(end = 2.dp))
+                        Text(text = aqiEmoji, fontSize = 8.sp, modifier = Modifier.padding(end = 2.dp))
                         Text(text = "$aqiText(${item.aqi})", color = aqiColor, fontSize = 8.sp, fontWeight = FontWeight.Bold)
                     }
                 }
@@ -345,8 +383,8 @@ fun CurrentWeatherSection(info: WeatherInfo, isNight: Boolean) {
         Text("${info.temp.toInt()}°", style = MaterialTheme.typography.displayLarge, color = Color.White)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("미세먼지 ", style = MaterialTheme.typography.bodyMedium, color = WhiteTrans80)
-            val (text, color) = aqiClassification(info.aqi)
-            Text("$text(${info.aqi})", color = color, style = MaterialTheme.typography.bodyLarge)
+            val (text, color, emoji) = aqiClassification(info.aqi)
+            Text("$emoji $text(${info.aqi})", color = color, style = MaterialTheme.typography.bodyLarge)
         }
     }
 }
@@ -355,7 +393,7 @@ fun CurrentWeatherSection(info: WeatherInfo, isNight: Boolean) {
 fun WeatherDetailGrid(info: WeatherInfo) {
     val currentHour = remember(info) {
         try {
-            Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).hour
+            Clock.System.now().toLocalDateTime(TimeZone.of("Asia/Seoul")).hour
         } catch (e: Exception) {
             12
         }

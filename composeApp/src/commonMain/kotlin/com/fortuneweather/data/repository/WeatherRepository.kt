@@ -4,6 +4,8 @@ import com.fortuneweather.data.cache.CacheManager
 import com.fortuneweather.data.datasource.AirKoreaDataSource
 import com.fortuneweather.data.datasource.KmaWeatherDataSource
 import com.fortuneweather.data.datasource.OwmWeatherDataSource
+import com.fortuneweather.data.datasource.GeminiSajuDataSource
+import com.fortuneweather.data.datasource.SajuFortune
 import com.fortuneweather.domain.model.RawWeatherData
 import com.fortuneweather.domain.model.WeatherCache
 import com.fortuneweather.domain.model.WeatherInfo
@@ -26,7 +28,8 @@ import kotlin.math.pow
 class WeatherRepository(
     private val kmaDataSource: KmaWeatherDataSource,
     private val airKoreaDataSource: AirKoreaDataSource,
-    private val owmDataSource: OwmWeatherDataSource
+    private val owmDataSource: OwmWeatherDataSource,
+    private val geminiSajuDataSource: GeminiSajuDataSource
 ) {
 
     private val systemZone = TimeZone.currentSystemDefault()
@@ -41,6 +44,7 @@ class WeatherRepository(
     suspend fun getIntegratedWeather(
         lat: Double,
         lon: Double,
+        addressName: String? = null,
         forceRefresh: Boolean = false
     ): WeatherInfo = coroutineScope {
         Logger.i("--- Weather Pipeline Triggered (forceRefresh=$forceRefresh) ---")
@@ -70,7 +74,7 @@ class WeatherRepository(
         
         val isSouthKorea = lat in WeatherConstants.KOREA_LAT_RANGE && lon in WeatherConstants.KOREA_LON_RANGE
         val finalWeatherInfo = if (isSouthKorea) {
-            getKoreaWeather(lat, lon)
+            getKoreaWeather(lat, lon, addressName)
         } else {
             getGlobalWeather(lat, lon)
         }
@@ -94,12 +98,14 @@ class WeatherRepository(
 
     private suspend fun getKoreaWeather(
         lat: Double,
-        lon: Double
+        lon: Double,
+        addressName: String?
     ): WeatherInfo = coroutineScope {
-        // 1. 완전히 독립적인 API 3개를 병렬로 조회 개시
+        // 1. 완전히 독립적인 API 4개를 병렬로 조회 개시
         val owmAirDef = async { owmDataSource.fetchOwmAirPollutionForecast(lat, lon) }
         val realtimeDef = async { kmaDataSource.fetchKmaRealtimeWeather(lat, lon) }
         val stationDef = async { kmaDataSource.fetchNearestStation(lat, lon) }
+        val uvDef = async { kmaDataSource.fetchKmaUvIndex(addressName) }
 
         // 2. 관측소 정보가 오면 바로 이어서 에어코리아 미세먼지 조회를 비동기로 실행
         val stationName = stationDef.await()
@@ -136,11 +142,20 @@ class WeatherRepository(
         val pm25Val = aqiData.pm25
         val aqiVal = aqiData.khaiValue
 
-        val uvVal = calculateUvIndex(now, finalCondition)
+        val kmaUv = uvDef.await()
+        val uvVal = kmaUv ?: calculateUvIndex(now, finalCondition)
         val phase = calculateMoonPhase()
 
-        val windSpeedVal = if (realtime.windSpeed != WeatherConstants.DOUBLE_UNKNOWN) realtime.windSpeed else 0.0
-        val rainAmountVal = if (realtime.rainAmount != WeatherConstants.DOUBLE_UNKNOWN) realtime.rainAmount else 0.0
+        val windSpeedVal = if (realtime.windSpeed != WeatherConstants.DOUBLE_UNKNOWN) {
+            realtime.windSpeed
+        } else {
+            if (owmResult.currentWindSpeed != WeatherConstants.DOUBLE_UNKNOWN) owmResult.currentWindSpeed else 0.0
+        }
+        val rainAmountVal = if (realtime.rainAmount != WeatherConstants.DOUBLE_UNKNOWN) {
+            realtime.rainAmount
+        } else {
+            if (owmResult.currentRain != WeatherConstants.DOUBLE_UNKNOWN) owmResult.currentRain else 0.0
+        }
         
         val finalHumidity = if (realtime.humidity != WeatherConstants.INT_UNKNOWN) {
             realtime.humidity
@@ -157,12 +172,24 @@ class WeatherRepository(
         val feelsLikeVal = calculateFeelsLike(finalTemp, windSpeedVal, finalHumidity)
         val finalHourlyList = kma24HourForecast.hourly
 
+        val finalVisibility = if (owmResult.currentVisibility != WeatherConstants.DOUBLE_UNKNOWN) {
+            owmResult.currentVisibility
+        } else {
+            WeatherConstants.PLACEHOLDER_VISIBILITY
+        }
+
+        val finalPressure = if (owmResult.currentPressure != WeatherConstants.DOUBLE_UNKNOWN) {
+            owmResult.currentPressure
+        } else {
+            WeatherConstants.PLACEHOLDER_PRESSURE
+        }
+
         WeatherInfo(
             locationName = locationName, temp = finalTemp, feelsLike = feelsLikeVal, humidity = finalHumidity,
             condition = finalCondition, aqi = aqiVal, pm10 = pm10Val, pm25 = pm25Val, uvIndex = uvVal, 
             windDirection = windDirectionVal, 
             windSpeed = windSpeedVal, rainAmount = rainAmountVal,
-            pressure = WeatherConstants.PLACEHOLDER_PRESSURE, visibility = WeatherConstants.PLACEHOLDER_VISIBILITY, sunrise = sunTimes.sunrise, sunset = sunTimes.sunset,
+            pressure = finalPressure, visibility = finalVisibility, sunrise = sunTimes.sunrise, sunset = sunTimes.sunset,
             moonPhase = phase,
             hourly = finalHourlyList, daily = finalDailyList,
             luckyColor = calculateLuckyColor(finalTemp, finalCondition), fashionTip = getFashionRecommendation(finalTemp),
@@ -210,12 +237,24 @@ class WeatherRepository(
         val feelsLikeVal = calculateFeelsLike(finalTemp, windSpeedVal, finalHumidity)
         val finalHourlyList = owmResult.hourlyList
 
+        val finalVisibility = if (owmResult.currentVisibility != WeatherConstants.DOUBLE_UNKNOWN) {
+            owmResult.currentVisibility
+        } else {
+            WeatherConstants.PLACEHOLDER_VISIBILITY
+        }
+
+        val finalPressure = if (owmResult.currentPressure != WeatherConstants.DOUBLE_UNKNOWN) {
+            owmResult.currentPressure
+        } else {
+            WeatherConstants.PLACEHOLDER_PRESSURE
+        }
+
         WeatherInfo(
             locationName = locationName, temp = finalTemp, feelsLike = feelsLikeVal, humidity = finalHumidity,
             condition = finalCondition, aqi = aqiVal, pm10 = pm10Val, pm25 = pm25Val, uvIndex = uvVal, 
             windDirection = windDirectionVal, 
             windSpeed = windSpeedVal, rainAmount = rainAmountVal,
-            pressure = WeatherConstants.PLACEHOLDER_PRESSURE, visibility = WeatherConstants.PLACEHOLDER_VISIBILITY, sunrise = sunTimes.sunrise, sunset = sunTimes.sunset,
+            pressure = finalPressure, visibility = finalVisibility, sunrise = sunTimes.sunrise, sunset = sunTimes.sunset,
             moonPhase = phase,
             hourly = finalHourlyList, daily = finalDailyList,
             luckyColor = calculateLuckyColor(finalTemp, finalCondition), fashionTip = getFashionRecommendation(finalTemp),
@@ -265,5 +304,68 @@ class WeatherRepository(
         temp > 20 -> "Yellow"
         temp > 10 -> "Sky Blue"
         else -> "Lavender"
+    }
+
+    suspend fun getSajuFortune(
+        birthDate: String,
+        birthTime: String,
+        isLunar: Boolean,
+        gender: String,
+        forceRefresh: Boolean = false
+    ): SajuFortune {
+        val today = Clock.System.now().toLocalDateTime(systemZone)
+        val todayDateStr = "${today.year}-${today.monthNumber}-${today.dayOfMonth}"
+        val inputCombo = "${birthDate}_${birthTime}_${isLunar}_${gender}"
+        
+        if (!forceRefresh) {
+            try {
+                val cachedDate = cacheManager.getCache("saju_result_date")
+                val cachedCombo = cacheManager.getCache("saju_result_input")
+                val cachedJson = cacheManager.getCache("saju_result_cache")
+                
+                if (cachedDate == todayDateStr && cachedCombo == inputCombo && !cachedJson.isNullOrBlank()) {
+                    Logger.i("--- Valid Saju Cache Found ---")
+                    return json.decodeFromString<SajuFortune>(cachedJson)
+                }
+            } catch (e: Exception) {
+                Logger.e("Failed to read saju cache", e)
+            }
+        }
+        
+        return try {
+            val newSaju = geminiSajuDataSource.fetchSajuFortune(
+                birthDate = birthDate,
+                birthTime = birthTime,
+                isLunar = isLunar,
+                gender = gender,
+                todayDate = todayDateStr
+            )
+            
+            try {
+                cacheManager.saveCache("saju_result_date", todayDateStr)
+                cacheManager.saveCache("saju_result_input", inputCombo)
+                cacheManager.saveCache("saju_result_cache", json.encodeToString(newSaju))
+                Logger.i("--- Saju Cache Successfully Saved ---")
+            } catch (e: Exception) {
+                Logger.e("Failed to save saju cache", e)
+            }
+            
+            newSaju
+        } catch (apiException: Exception) {
+            try {
+                val cachedCombo = cacheManager.getCache("saju_result_input")
+                val cachedJson = cacheManager.getCache("saju_result_cache")
+                if (cachedCombo == inputCombo && !cachedJson.isNullOrBlank()) {
+                    Logger.i("--- API Call Failed, but Found Previous Backup Cache ---")
+                    val backupSaju = json.decodeFromString<SajuFortune>(cachedJson)
+                    return backupSaju.copy(
+                        overallMsg = backupSaju.overallMsg + "\n\n(※ 오늘의 분석 이용량 초과 또는 네트워크 지연으로 인해, 가장 최근에 받아보셨던 사주 분석 결과를 표시합니다.)"
+                    )
+                }
+            } catch (cacheException: Exception) {
+                Logger.e("Failed to read backup saju cache", cacheException)
+            }
+            throw apiException
+        }
     }
 }

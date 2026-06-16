@@ -72,7 +72,8 @@ data class OwmForecastItem(
     val pop: Double? = 0.0,
     @SerialName("dt_txt") val dtTxt: String,
     val wind: OwmWind? = null,
-    val rain: OwmRain? = null
+    val rain: OwmRain? = null,
+    val visibility: Int? = null
 )
 
 @Serializable
@@ -91,7 +92,8 @@ data class OwmForecastMain(
     val temp: Double,
     @SerialName("temp_min") val tempMin: Double,
     @SerialName("temp_max") val tempMax: Double,
-    val humidity: Int
+    val humidity: Int,
+    val pressure: Double? = null
 )
 
 @Serializable

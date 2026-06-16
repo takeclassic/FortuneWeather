@@ -1,0 +1,15 @@
+# Coding Rules for FortuneWeather Project
+
+## 🚨 CRITICAL RULE: NO HARDCODING (하드코딩 절대 금지)
+You must NEVER hardcode values or state outcomes. All state management and conditional branching must be dynamic and derive strictly from data state or business logic.
+
+1. **State & Branching Rules**
+   - Do NOT force boolean state overrides (e.g., forcing `isEditing = true` upon screen re-entry or state initialization). 
+   - Derive UI flags dynamically from cached data (e.g., `isEditing = birthDate.isBlank()`).
+
+2. **Constant Isolation**
+   - Never embed magic numbers, raw strings, API URLs, or fixed paddings within active functions.
+   - Store all constants in clean constants files (like `WeatherConstants`), resources, or externalized configurations (`local.properties`, `BuildKonfig`).
+
+3. **Always Reference the Guidelines**
+   - Refer to [DEVELOPER_GUIDELINES.md](file:///Users/syjoung/Projects/FortuneWeather/DEVELOPER_GUIDELINES.md) in the project root for further detailed constraints before modifying any files.

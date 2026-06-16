@@ -80,5 +80,7 @@ data class OwmForecastResult(
     val currentWindSpeed: Double = WeatherConstants.DOUBLE_UNKNOWN,
     val currentWindDeg: Double = WeatherConstants.DOUBLE_UNKNOWN,
     val currentRain: Double = WeatherConstants.DOUBLE_UNKNOWN,
+    val currentVisibility: Double = WeatherConstants.DOUBLE_UNKNOWN,
+    val currentPressure: Double = WeatherConstants.DOUBLE_UNKNOWN,
     val cityName: String = WeatherConstants.NO_DATA
 )

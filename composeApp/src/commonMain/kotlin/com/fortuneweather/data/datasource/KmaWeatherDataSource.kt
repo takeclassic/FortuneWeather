@@ -183,9 +183,11 @@ class KmaWeatherDataSource(client: HttpClient) : BaseRemoteDataSource(client) {
                 val currentWindDir = currentVec?.let { WeatherConstants.degreeToDirection(it) }
                     ?: WeatherConstants.DEFAULT_WIND_DIRECTION
 
+                val currentHum = items.find { it.category == "REH" }?.fcstValue?.toIntOrNull() ?: WeatherConstants.DEFAULT_HUMIDITY
+
                 RawWeatherData(
                     temp = hourly.firstOrNull()?.temp ?: 0.0,
-                    humidity = WeatherConstants.DEFAULT_HUMIDITY,
+                    humidity = currentHum,
                     condition = hourly.firstOrNull()?.condition ?: WeatherConstants.DEFAULT_CONDITION,
                     hourly = hourly,
                     daily = daily,
@@ -229,5 +231,74 @@ class KmaWeatherDataSource(client: HttpClient) : BaseRemoteDataSource(client) {
             else -> "2000"
         }
         return Pair("${date.year}${date.monthNumber.toString().padStart(2, '0')}${date.dayOfMonth.toString().padStart(2, '0')}", baseTime)
+    }
+
+    suspend fun fetchKmaUvIndex(addressName: String?): Double? {
+        return try {
+            val areaNo = getLivingWeatherAreaNo(addressName)
+            val (dateStr, hourStr) = getKmaUvBaseTime()
+            val time = dateStr + hourStr
+            val url = "http://apis.data.go.kr/1360000/LivingWthrIdxServiceV4/getUVIdxV4?serviceKey=$kmaServiceKey&dataType=json&areaNo=$areaNo&time=$time"
+            val responseText = safeGet(url) ?: return null
+            val jsonElement = json.parseToJsonElement(responseText)
+            val responseObj = jsonElement.jsonObject["response"]?.jsonObject
+            val header = responseObj?.get("header")?.jsonObject
+            val resultCode = header?.get("resultCode")?.jsonPrimitive?.content
+            if (resultCode == "00") {
+                val body = responseObj.get("body")?.jsonObject
+                val items = body?.get("items")?.jsonObject
+                val itemArray = items?.get("item")?.jsonArray
+                val firstItem = itemArray?.getOrNull(0)?.jsonObject
+                val uvValue = firstItem?.get("today")?.jsonPrimitive?.content?.toDoubleOrNull()
+                uvValue
+            } else {
+                Logger.e("KMA UV Index API error: resultCode=$resultCode")
+                null
+            }
+        } catch (e: Exception) {
+            Logger.e("Failed to fetch KMA UV index", e)
+            null
+        }
+    }
+
+    private fun getLivingWeatherAreaNo(address: String?): String {
+        if (address == null) return "1100000000"
+        val clean = address.trim()
+        return when {
+            clean.contains("서울") -> "1100000000"
+            clean.contains("부산") -> "2600000000"
+            clean.contains("대구") -> "2700000000"
+            clean.contains("인천") -> "2800000000"
+            clean.contains("광주") -> "2900000000"
+            clean.contains("대전") -> "3000000000"
+            clean.contains("울산") -> "3100000000"
+            clean.contains("세종") -> "3600000000"
+            clean.contains("경기") -> "4100000000"
+            clean.contains("강원") -> "5100000000"
+            clean.contains("충북") || clean.contains("충청북") -> "4300000000"
+            clean.contains("충남") || clean.contains("충청남") -> "4400000000"
+            clean.contains("전북") || clean.contains("전라북") -> "4500000000"
+            clean.contains("전남") || clean.contains("전라남") -> "4600000000"
+            clean.contains("경북") || clean.contains("경상북") -> "4700000000"
+            clean.contains("경남") || clean.contains("경상남") -> "4800000000"
+            clean.contains("제주") -> "5000000000"
+            else -> "1100000000"
+        }
+    }
+
+    private fun getKmaUvBaseTime(): Pair<String, String> {
+        val now = Clock.System.now().toLocalDateTime(kstZone)
+        var date = now.date
+        val hour = now.hour
+        val hourStr = when {
+            hour < 6 -> {
+                date = date.minus(1, DateTimeUnit.DAY)
+                "18"
+            }
+            hour < 18 -> "06"
+            else -> "18"
+        }
+        val dateStr = "${date.year}${date.monthNumber.toString().padStart(2, '0')}${date.dayOfMonth.toString().padStart(2, '0')}"
+        return Pair(dateStr, hourStr)
     }
 }

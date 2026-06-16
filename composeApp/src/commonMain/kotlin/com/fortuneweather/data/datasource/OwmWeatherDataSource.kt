@@ -113,6 +113,8 @@ class OwmWeatherDataSource(client: HttpClient) : BaseRemoteDataSource(client) {
             val windSpeedVal = firstItem?.wind?.speed ?: 0.0
             val windDegVal = firstItem?.wind?.deg ?: 0.0
             val rainVal = firstItem?.rain?.threeHour ?: 0.0
+            val visibilityVal = firstItem?.visibility?.let { it / 1000.0 } ?: WeatherConstants.PLACEHOLDER_VISIBILITY
+            val pressureVal = firstItem?.main?.pressure ?: WeatherConstants.PLACEHOLDER_PRESSURE
 
             OwmForecastResult(
                 dailyList = dailyList,
@@ -123,6 +125,8 @@ class OwmWeatherDataSource(client: HttpClient) : BaseRemoteDataSource(client) {
                 currentWindSpeed = windSpeedVal,
                 currentWindDeg = windDegVal,
                 currentRain = rainVal,
+                currentVisibility = visibilityVal,
+                currentPressure = pressureVal,
                 cityName = decoded.city?.name ?: "해외 지역"
             )
         } catch (e: Exception) {

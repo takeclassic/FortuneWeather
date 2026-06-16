@@ -3,6 +3,7 @@ package com.fortuneweather.ui
 import com.fortuneweather.data.repository.WeatherRepository
 import com.fortuneweather.domain.location.LocationTracker
 import com.fortuneweather.domain.model.WeatherInfo
+import com.fortuneweather.data.datasource.SajuFortune
 import com.fortuneweather.utils.Logger
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -38,6 +39,16 @@ class WeatherViewModel(
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
 
+    sealed interface SajuUiState {
+        object Initial : SajuUiState
+        object Loading : SajuUiState
+        data class Success(val saju: SajuFortune) : SajuUiState
+        data class Error(val message: String) : SajuUiState
+    }
+
+    private val _sajuState = MutableStateFlow<SajuUiState>(SajuUiState.Initial)
+    val sajuState: StateFlow<SajuUiState> = _sajuState.asStateFlow()
+
     fun loadWeather(forceRefresh: Boolean = false) {
         viewModelScope.launch {
             if (forceRefresh) {
@@ -56,6 +67,7 @@ class WeatherViewModel(
                 val info = repository.getIntegratedWeather(
                     location.latitude,
                     location.longitude,
+                    addressName = location.addressName,
                     forceRefresh = forceRefresh
                 )
 
@@ -77,6 +89,35 @@ class WeatherViewModel(
 
     fun showError(message: String) {
         _uiState.value = WeatherUiState.Error(message)
+    }
+
+    fun loadSajuFortune(
+        birthDate: String,
+        birthTime: String,
+        isLunar: Boolean,
+        gender: String,
+        forceRefresh: Boolean = false
+    ) {
+        viewModelScope.launch {
+            _sajuState.value = SajuUiState.Loading
+            try {
+                val saju = repository.getSajuFortune(
+                    birthDate = birthDate,
+                    birthTime = birthTime,
+                    isLunar = isLunar,
+                    gender = gender,
+                    forceRefresh = forceRefresh
+                )
+                _sajuState.value = SajuUiState.Success(saju)
+            } catch (e: Exception) {
+                Logger.e("Failed to load Saju fortune", e)
+                _sajuState.value = SajuUiState.Error(e.message ?: "사주 분석 중 오류가 발생했습니다.")
+            }
+        }
+    }
+
+    fun resetSaju() {
+        _sajuState.value = SajuUiState.Initial
     }
 
     /** ViewModel이 더 이상 필요 없을 때 호출해 내부 coroutine들을 취소한다. */

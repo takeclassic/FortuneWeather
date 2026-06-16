@@ -26,5 +26,8 @@ val FashionGreen = Color(0xFF81C784)
 
 // Standard
 val WhiteTrans80 = Color(0xCCFFFFFF)
+val WhiteTrans30 = Color(0x4DFFFFFF)
+val WhiteTrans20 = Color(0x33FFFFFF)
 val WhiteTrans15 = Color(0x26FFFFFF)
 val WhiteTrans10 = Color(0x1AFFFFFF)
+val WhiteTrans5 = Color(0x0DFFFFFF)

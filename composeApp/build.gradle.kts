@@ -21,6 +21,7 @@ buildkonfig {
         buildConfigField(com.codingfeline.buildkonfig.compiler.FieldSpec.Type.STRING, "OPENWEATHER_KEY", localProperties.getProperty("OPENWEATHER_KEY") ?: "")
         buildConfigField(com.codingfeline.buildkonfig.compiler.FieldSpec.Type.STRING, "WEATHERAPI_KEY", localProperties.getProperty("WEATHERAPI_KEY") ?: "")
         buildConfigField(com.codingfeline.buildkonfig.compiler.FieldSpec.Type.STRING, "KMA_SERVICE_KEY", localProperties.getProperty("KMA_SERVICE_KEY") ?: "")
+        buildConfigField(com.codingfeline.buildkonfig.compiler.FieldSpec.Type.STRING, "GEMINI_API_KEY", localProperties.getProperty("GEMINI_API_KEY") ?: "")
     }
 }
 

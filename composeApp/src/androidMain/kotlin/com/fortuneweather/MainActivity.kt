@@ -27,7 +27,14 @@ import com.fortuneweather.ui.WeatherViewModel
 import com.fortuneweather.ui.WeatherUiState
 import com.fortuneweather.ui.theme.*
 import com.fortuneweather.utils.Logger
+import com.google.android.gms.ads.AdError
+import com.google.android.gms.ads.AdRequest
+import com.google.android.gms.ads.FullScreenContentCallback
+import com.google.android.gms.ads.LoadAdError
 import com.google.android.gms.ads.MobileAds
+import com.google.android.gms.ads.interstitial.InterstitialAd
+import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback
+import com.fortuneweather.ui.FortuneDetailScreen
 
 class MainActivity : ComponentActivity() {
 
@@ -38,10 +45,66 @@ class MainActivity : ComponentActivity() {
     // Activity 수명 주기와 동일하게 ViewModel을 유지한다.
     private lateinit var viewModel: WeatherViewModel
 
+    private var mInterstitialAd: InterstitialAd? = null
+    private var isAdLoading = false
+
+    private fun loadAd() {
+        if (isAdLoading || mInterstitialAd != null) return
+        isAdLoading = true
+        val adRequest = AdRequest.Builder().build()
+        // Google Test Interstitial Ad Unit ID
+        val testAdUnitId = "ca-app-pub-3940256099942544/1033173712"
+        InterstitialAd.load(
+            this,
+            testAdUnitId,
+            adRequest,
+            object : InterstitialAdLoadCallback() {
+                override fun onAdFailedToLoad(adError: LoadAdError) {
+                    Logger.e("Ad failed to load: ${adError.message}")
+                    mInterstitialAd = null
+                    isAdLoading = false
+                }
+
+                override fun onAdLoaded(interstitialAd: InterstitialAd) {
+                    Logger.i("Ad loaded successfully.")
+                    mInterstitialAd = interstitialAd
+                    isAdLoading = false
+                }
+            }
+        )
+    }
+
+    private fun showInterstitialAd(onAdClosed: () -> Unit) {
+        val ad = mInterstitialAd
+        if (ad != null) {
+            ad.fullScreenContentCallback = object : FullScreenContentCallback() {
+                override fun onAdDismissedFullScreenContent() {
+                    Logger.i("Ad dismissed.")
+                    mInterstitialAd = null
+                    onAdClosed()
+                    loadAd()
+                }
+
+                override fun onAdFailedToShowFullScreenContent(adError: AdError) {
+                    Logger.e("Ad failed to show: ${adError.message}")
+                    mInterstitialAd = null
+                    onAdClosed()
+                    loadAd()
+                }
+            }
+            ad.show(this)
+        } else {
+            Logger.i("Ad not ready yet. Skipping directly to fortune detail.")
+            onAdClosed()
+            loadAd()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Logger.i("MainActivity — onCreate")
         MobileAds.initialize(this) {}
+        loadAd()
 
         viewModel = container.createViewModel()
 
@@ -50,6 +113,7 @@ class MainActivity : ComponentActivity() {
                 val context = this
                 val uiState by viewModel.uiState.collectAsState()
                 val isRefreshing by viewModel.isRefreshing.collectAsState()
+                var currentScreen by remember { mutableStateOf("main") }
 
                 val locationPermissionLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.RequestPermission()
@@ -78,10 +142,33 @@ class MainActivity : ComponentActivity() {
                 }
 
                 Box(modifier = Modifier.fillMaxSize()) {
-                    when (val state = uiState) {
-                        is WeatherUiState.Loading -> LoadingScreen()
-                        is WeatherUiState.Success -> WeatherApp(state.weatherInfo, isRefreshing, { handleRefreshAction() })
-                        is WeatherUiState.Error -> ErrorScreen(state.message, "다시 시도", { handleRefreshAction() })
+                    val state = uiState
+                    if (currentScreen == "fortune" && state is WeatherUiState.Success) {
+                        FortuneDetailScreen(
+                            viewModel = viewModel,
+                            onShowAd = { onAdClosed ->
+                                showInterstitialAd(onAdClosed)
+                            },
+                            onBackClick = {
+                                viewModel.resetSaju()
+                                currentScreen = "main"
+                            }
+                        )
+                    } else {
+                        when (state) {
+                            is WeatherUiState.Loading -> LoadingScreen()
+                            is WeatherUiState.Success -> {
+                                WeatherApp(
+                                    weatherInfo = state.weatherInfo,
+                                    isRefreshing = isRefreshing,
+                                    onRefresh = { handleRefreshAction() },
+                                    onFortuneClick = {
+                                        currentScreen = "fortune"
+                                    }
+                                )
+                            }
+                            is WeatherUiState.Error -> ErrorScreen(state.message, "다시 시도", { handleRefreshAction() })
+                        }
                     }
                 }
             }
