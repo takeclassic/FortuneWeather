@@ -29,6 +29,7 @@ import kotlinx.datetime.toLocalDateTime
 import androidx.compose.foundation.BorderStroke
 import com.fortuneweather.BuildKonfig
 import com.fortuneweather.data.datasource.SajuFortune
+import com.fortuneweather.data.datasource.SajuHanja
 import com.fortuneweather.data.cache.CacheManager
 import kotlinx.serialization.json.Json
 import androidx.compose.foundation.text.KeyboardOptions
@@ -72,9 +73,9 @@ fun FortuneDetailScreen(
 
     val sajuState by viewModel.sajuState.collectAsState()
 
-    // 동의가 되어 있고, 생년월일이 등록되어 있으며, 아직 로드하지 않은 상태라면 자동 로드 실행
+    // 동의가 되어 있고, 생년월일이 등록되어 있으며, 아직 로드하지 않은 상태이고 편집 중이 아니라면 자동 로드 실행
     LaunchedEffect(isConsentGranted, birthDate) {
-        if (isConsentGranted && birthDate.length == 8 && sajuState is WeatherViewModel.SajuUiState.Initial) {
+        if (isConsentGranted && birthDate.length == 8 && !isEditing && sajuState is WeatherViewModel.SajuUiState.Initial) {
             val formattedDate = "${birthDate.substring(0, 4)}-${birthDate.substring(4, 6)}-${birthDate.substring(6, 8)}"
             val formattedTime = if (isTimeUnknown) "모름" else {
                 if (birthTime.length == 4) {
@@ -93,13 +94,34 @@ fun FortuneDetailScreen(
         }
     }
 
-    // 신비롭고 고급스러운 퍼플-블랙 우주 그라데이션 백그라운드
-    val mysticalGradient = remember {
+    // 입력 중 완료되었을 때 백그라운드에서 사주 한자를 미리 조회해 둡니다.
+    LaunchedEffect(birthDate, birthTime, isLunar, gender, isTimeUnknown) {
+        if (birthDate.length == 8 && (isTimeUnknown || birthTime.length == 4)) {
+            val formattedDate = "${birthDate.substring(0, 4)}-${birthDate.substring(4, 6)}-${birthDate.substring(6, 8)}"
+            val formattedTime = if (isTimeUnknown) "모름" else {
+                if (birthTime.length == 4) {
+                    "${birthTime.substring(0, 2)}:${birthTime.substring(2, 4)}"
+                } else {
+                    "모름"
+                }
+            }
+            viewModel.prefetchSajuHanja(
+                birthDate = formattedDate,
+                birthTime = formattedTime,
+                isLunar = isLunar,
+                gender = gender
+            )
+        } else {
+            viewModel.clearPreviewHanja()
+        }
+    }
+
+    // 고급스러운 차콜-블랙 그라데이션 백그라운드
+    val modernDarkGradient = remember {
         Brush.verticalGradient(
             colors = listOf(
-                Color(0xFF1E1B4B), // Deep Indigo
-                Color(0xFF311042), // Dark Violet
-                Color(0xFF0F0C20)  // Near Black
+                Color(0xFF1E1E22), // Dark Slate Gray
+                Color(0xFF121214)  // Charcoal Black
             )
         )
     }
@@ -107,7 +129,7 @@ fun FortuneDetailScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(mysticalGradient)
+            .background(modernDarkGradient)
     ) {
         Column(
             modifier = Modifier
@@ -115,7 +137,7 @@ fun FortuneDetailScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
         ) {
-            Spacer(modifier = Modifier.height(50.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // 1. 헤더 영역 (뒤로가기 및 타이틀)
             Row(
@@ -133,7 +155,7 @@ fun FortuneDetailScreen(
                 )
                 Spacer(modifier = Modifier.width(16.dp))
                 Text(
-                    text = "🔮 오늘의 AI 사주 명당",
+                    text = "오늘의 사주팔자",
                     color = Color.White,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold
@@ -340,6 +362,91 @@ fun FortuneDetailScreen(
                                 }
                             }
 
+                            val previewState by viewModel.previewHanjaState.collectAsState()
+                            
+                            when (val state = previewState) {
+                                is WeatherViewModel.SajuPreviewState.Empty -> {
+                                    // Show nothing
+                                }
+                                is WeatherViewModel.SajuPreviewState.Loading -> {
+                                    Card(
+                                        shape = RoundedCornerShape(24.dp),
+                                        colors = CardDefaults.cardColors(containerColor = WhiteTrans10),
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(24.dp).fillMaxWidth(),
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                                        ) {
+                                            CircularProgressIndicator(
+                                                color = FortuneGold,
+                                                modifier = Modifier.size(36.dp)
+                                            )
+                                            Text(
+                                                text = "나의 사주팔자 계산 중...",
+                                                color = WhiteTrans80,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
+                                    }
+                                }
+                                is WeatherViewModel.SajuPreviewState.Success -> {
+                                    Card(
+                                        shape = RoundedCornerShape(24.dp),
+                                        colors = CardDefaults.cardColors(containerColor = WhiteTrans10),
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(18.dp).fillMaxWidth(),
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                                        ) {
+                                            Text(
+                                                text = "🔮 나의 사주팔자 (미리보기)",
+                                                color = FortuneGold,
+                                                fontSize = 15.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            
+                                            SajuMyungbanGrid(
+                                                hourHanja = state.hanja.hourHanja,
+                                                dayHanja = state.hanja.dayHanja,
+                                                monthHanja = state.hanja.monthHanja,
+                                                yearHanja = state.hanja.yearHanja
+                                            )
+
+                                            FiveElementsSection(
+                                                hourHanja = state.hanja.hourHanja,
+                                                dayHanja = state.hanja.dayHanja,
+                                                monthHanja = state.hanja.monthHanja,
+                                                yearHanja = state.hanja.yearHanja
+                                            )
+                                        }
+                                    }
+                                }
+                                is WeatherViewModel.SajuPreviewState.Error -> {
+                                    Card(
+                                        shape = RoundedCornerShape(24.dp),
+                                        colors = CardDefaults.cardColors(containerColor = WhiteTrans10),
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = "사주팔자를 도출하지 못했습니다: ${state.message}",
+                                                color = Color(0xFFEF5350),
+                                                fontSize = 12.sp,
+                                                textAlign = TextAlign.Center
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
                             Spacer(modifier = Modifier.height(8.dp))
 
                             Button(
@@ -367,7 +474,7 @@ fun FortuneDetailScreen(
                                                 birthTime = formattedTime,
                                                 isLunar = isLunar,
                                                 gender = gender,
-                                                forceRefresh = true
+                                                forceRefresh = false
                                             )
                                         }
                                         if (!hasSeenAd) {
@@ -427,7 +534,7 @@ fun FortuneDetailScreen(
                                     verticalArrangement = Arrangement.spacedBy(20.dp)
                                 ) {
                                     Text(
-                                        text = "🔮 오늘의 명리 에너지 조율 중",
+                                        text = "🔮 오늘의 사주팔자 조율 중",
                                         color = Color.White,
                                         fontSize = 16.sp,
                                         fontWeight = FontWeight.Bold
@@ -440,6 +547,27 @@ fun FortuneDetailScreen(
                                             dayHanja = cachedSaju.dayHanja,
                                             monthHanja = cachedSaju.monthHanja,
                                             yearHanja = cachedSaju.yearHanja
+                                        )
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        FiveElementsSection(
+                                            hourHanja = cachedSaju.hourHanja,
+                                            dayHanja = cachedSaju.dayHanja,
+                                            monthHanja = cachedSaju.monthHanja,
+                                            yearHanja = cachedSaju.yearHanja
+                                        )
+                                    } else if (sajuUi.previewHanja != null) {
+                                        SajuMyungbanGrid(
+                                            hourHanja = sajuUi.previewHanja.hourHanja,
+                                            dayHanja = sajuUi.previewHanja.dayHanja,
+                                            monthHanja = sajuUi.previewHanja.monthHanja,
+                                            yearHanja = sajuUi.previewHanja.yearHanja
+                                        )
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        FiveElementsSection(
+                                            hourHanja = sajuUi.previewHanja.hourHanja,
+                                            dayHanja = sajuUi.previewHanja.dayHanja,
+                                            monthHanja = sajuUi.previewHanja.monthHanja,
+                                            yearHanja = sajuUi.previewHanja.yearHanja
                                         )
                                     } else {
                                         SajuMyungbanGrid(
@@ -497,7 +625,7 @@ fun FortuneDetailScreen(
                                         )
                                         
                                         Text(
-                                            text = "동양 명리학 기운 분석 및 AI 사주 풀이 조율 중...",
+                                            text = "동양 명리학 기운 분석 및 AI 사주팔자 조율 중...",
                                             color = WhiteTrans80,
                                             fontSize = 11.sp,
                                             textAlign = TextAlign.Center
@@ -524,7 +652,7 @@ fun FortuneDetailScreen(
                                         verticalArrangement = Arrangement.spacedBy(12.dp)
                                     ) {
                                         Text(
-                                            text = "🔮 나의 사주 명반",
+                                            text = "🔮 나의 사주팔자",
                                             color = FortuneGold,
                                             fontSize = 16.sp,
                                             fontWeight = FontWeight.Bold
@@ -536,25 +664,34 @@ fun FortuneDetailScreen(
                                             monthHanja = saju.monthHanja,
                                             yearHanja = saju.yearHanja
                                         )
+
+                                        Spacer(modifier = Modifier.height(16.dp))
+
+                                        FiveElementsSection(
+                                            hourHanja = saju.hourHanja,
+                                            dayHanja = saju.dayHanja,
+                                            monthHanja = saju.monthHanja,
+                                            yearHanja = saju.yearHanja
+                                        )
                                     }
                                 }
 
                                 FortuneCard(
-                                    title = "🔮 오늘의 종합 사주 총평",
+                                    title = "오늘의 종합 사주 총평",
                                     stars = saju.overallStars,
                                     content = saju.overallMsg,
                                     headerColor = FortuneGold
                                 )
 
                                 FortuneCard(
-                                    title = "💵 금전운 흐름",
+                                    title = "금전운 흐름",
                                     stars = saju.moneyStars,
                                     content = saju.moneyMsg,
                                     headerColor = Color(0xFF81C784)
                                 )
 
                                 FortuneCard(
-                                    title = "❤️ 애정운 흐름",
+                                    title = "애정운 흐름",
                                     stars = saju.loveStars,
                                     content = saju.loveMsg,
                                     headerColor = Color(0xFFFF8A80)
@@ -567,7 +704,7 @@ fun FortuneDetailScreen(
                                 ) {
                                     Column(modifier = Modifier.padding(18.dp)) {
                                         Text(
-                                            text = "🩺 건강 및 조심할 점",
+                                            text = "건강 및 조심할 점",
                                             color = Color(0xFFFFB74D),
                                             fontSize = 16.sp,
                                             fontWeight = FontWeight.Bold
@@ -1012,7 +1149,7 @@ fun SajuMyungbanGrid(
                 Box(
                     modifier = Modifier
                         .size(44.dp)
-                        .background(Color(0xFF2E1A47), RoundedCornerShape(8.dp))
+                        .background(Color(0xFF2B2B30), RoundedCornerShape(8.dp))
                         .background(WhiteTrans5, RoundedCornerShape(8.dp)),
                     contentAlignment = Alignment.Center
                 ) {
@@ -1028,7 +1165,7 @@ fun SajuMyungbanGrid(
                 Box(
                     modifier = Modifier
                         .size(44.dp)
-                        .background(Color(0xFF1F1C3F), RoundedCornerShape(8.dp))
+                        .background(Color(0xFF1E1E22), RoundedCornerShape(8.dp))
                         .background(WhiteTrans5, RoundedCornerShape(8.dp)),
                     contentAlignment = Alignment.Center
                 ) {
@@ -1039,6 +1176,122 @@ fun SajuMyungbanGrid(
                         fontWeight = FontWeight.Bold
                     )
                 }
+            }
+        }
+    }
+}
+
+data class FiveElementsCount(
+    val wood: Int,
+    val fire: Int,
+    val earth: Int,
+    val metal: Int,
+    val water: Int
+)
+
+fun calculateFiveElements(
+    hourHanja: String,
+    dayHanja: String,
+    monthHanja: String,
+    yearHanja: String
+): FiveElementsCount {
+    val allChars = (hourHanja + dayHanja + monthHanja + yearHanja).filter { it != '？' }
+    var wood = 0
+    var fire = 0
+    var earth = 0
+    var metal = 0
+    var water = 0
+    
+    for (char in allChars) {
+        when (char) {
+            '甲', '乙', '寅', '卯' -> wood++
+            '丙', '丁', '巳', '午' -> fire++
+            '戊', '己', '辰', '戌', '丑', '未' -> earth++
+            '庚', '辛', '申', '酉' -> metal++
+            '壬', '癸', '亥', '子' -> water++
+        }
+    }
+    return FiveElementsCount(wood, fire, earth, metal, water)
+}
+
+data class ElementData(
+    val name: String,
+    val count: Int,
+    val color: Color
+)
+
+@Composable
+fun FiveElementsSection(
+    hourHanja: String,
+    dayHanja: String,
+    monthHanja: String,
+    yearHanja: String,
+    modifier: Modifier = Modifier
+) {
+    val counts = remember(hourHanja, dayHanja, monthHanja, yearHanja) {
+        calculateFiveElements(hourHanja, dayHanja, monthHanja, yearHanja)
+    }
+    
+    val total = (counts.wood + counts.fire + counts.earth + counts.metal + counts.water).coerceAtLeast(1)
+    
+    Column(
+        modifier = modifier.fillMaxWidth().padding(horizontal = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(
+            text = "☯️ 나의 오행 분포",
+            color = Color.White.copy(alpha = 0.8f),
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.align(Alignment.Start)
+        )
+        
+        val elements = listOf(
+            ElementData("목 (木 · 나무)", counts.wood, Color(0xFF4CAF50)),
+            ElementData("화 (火 · 불)", counts.fire, Color(0xFFE53935)),
+            ElementData("토 (土 · 흙)", counts.earth, Color(0xFFFFB300)),
+            ElementData("금 (金 · 쇠)", counts.metal, Color(0xFFB0BEC5)),
+            ElementData("수 (水 · 물)", counts.water, Color(0xFF29B6F6))
+        )
+        
+        elements.forEach { element ->
+            val ratio = element.count.toFloat() / total.toFloat()
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = element.name,
+                    color = Color.White.copy(alpha = 0.9f),
+                    fontSize = 12.sp,
+                    modifier = Modifier.width(90.dp)
+                )
+                
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(10.dp)
+                        .background(Color.White.copy(alpha = 0.1f), RoundedCornerShape(5.dp))
+                ) {
+                    if (element.count > 0) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .fillMaxWidth(ratio)
+                                .background(element.color, RoundedCornerShape(5.dp))
+                        )
+                    }
+                }
+                
+                Text(
+                    text = "${element.count}개",
+                    color = Color.White.copy(alpha = 0.8f),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.width(30.dp),
+                    textAlign = TextAlign.End
+                )
             }
         }
     }

@@ -6,6 +6,10 @@ import com.fortuneweather.data.datasource.KmaWeatherDataSource
 import com.fortuneweather.data.datasource.OwmWeatherDataSource
 import com.fortuneweather.data.datasource.GeminiSajuDataSource
 import com.fortuneweather.data.datasource.SajuFortune
+import com.fortuneweather.data.datasource.SajuHanja
+import com.fortuneweather.utils.SajuCalculator
+import com.fortuneweather.utils.LunarSolarConverter
+import com.fortuneweather.utils.SolarDate
 import com.fortuneweather.domain.model.RawWeatherData
 import com.fortuneweather.domain.model.WeatherCache
 import com.fortuneweather.domain.model.WeatherInfo
@@ -332,40 +336,105 @@ class WeatherRepository(
             }
         }
         
-        return try {
-            val newSaju = geminiSajuDataSource.fetchSajuFortune(
-                birthDate = birthDate,
-                birthTime = birthTime,
-                isLunar = isLunar,
-                gender = gender,
-                todayDate = todayDateStr
-            )
-            
-            try {
-                cacheManager.saveCache("saju_result_date", todayDateStr)
-                cacheManager.saveCache("saju_result_input", inputCombo)
-                cacheManager.saveCache("saju_result_cache", json.encodeToString(newSaju))
-                Logger.i("--- Saju Cache Successfully Saved ---")
-            } catch (e: Exception) {
-                Logger.e("Failed to save saju cache", e)
-            }
-            
-            newSaju
-        } catch (apiException: Exception) {
-            try {
-                val cachedCombo = cacheManager.getCache("saju_result_input")
-                val cachedJson = cacheManager.getCache("saju_result_cache")
-                if (cachedCombo == inputCombo && !cachedJson.isNullOrBlank()) {
-                    Logger.i("--- API Call Failed, but Found Previous Backup Cache ---")
-                    val backupSaju = json.decodeFromString<SajuFortune>(cachedJson)
-                    return backupSaju.copy(
-                        overallMsg = backupSaju.overallMsg + "\n\n(※ 오늘의 분석 이용량 초과 또는 네트워크 지연으로 인해, 가장 최근에 받아보셨던 사주 분석 결과를 표시합니다.)"
-                    )
-                }
-            } catch (cacheException: Exception) {
-                Logger.e("Failed to read backup saju cache", cacheException)
-            }
-            throw apiException
+        // 1. Get correct local Saju pillars first
+        val localHanja = getSajuHanjaOnly(birthDate, birthTime, isLunar, gender)
+        
+        // 2. Fetch fortune using local Hanja as a fixed anchor
+        val newSaju = geminiSajuDataSource.fetchSajuFortune(
+            birthDate = birthDate,
+            birthTime = birthTime,
+            isLunar = isLunar,
+            gender = gender,
+            todayDate = todayDateStr,
+            localHanja = localHanja
+        )
+        
+        try {
+            cacheManager.saveCache("saju_result_date", todayDateStr)
+            cacheManager.saveCache("saju_result_input", inputCombo)
+            cacheManager.saveCache("saju_result_cache", json.encodeToString(newSaju))
+            Logger.i("--- Saju Cache Successfully Saved ---")
+        } catch (e: Exception) {
+            Logger.e("Failed to save saju cache", e)
         }
+        
+        return newSaju
+    }
+
+    fun isSajuFortuneCached(
+        birthDate: String,
+        birthTime: String,
+        isLunar: Boolean,
+        gender: String
+    ): Boolean {
+        val today = Clock.System.now().toLocalDateTime(systemZone)
+        val todayDateStr = "${today.year}-${today.monthNumber}-${today.dayOfMonth}"
+        val inputCombo = "${birthDate}_${birthTime}_${isLunar}_${gender}"
+        return try {
+            val cachedDate = cacheManager.getCache("saju_result_date")
+            val cachedCombo = cacheManager.getCache("saju_result_input")
+            val cachedJson = cacheManager.getCache("saju_result_cache")
+            cachedDate == todayDateStr && cachedCombo == inputCombo && !cachedJson.isNullOrBlank()
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    suspend fun getSajuHanjaOnly(
+        birthDate: String,
+        birthTime: String,
+        isLunar: Boolean,
+        gender: String
+    ): SajuHanja {
+        val inputCombo = "${birthDate}_${birthTime}_${isLunar}_${gender}"
+        try {
+            val cachedHanjaJson = cacheManager.getCache("saju_hanja_preview_$inputCombo")
+            if (!cachedHanjaJson.isNullOrBlank()) {
+                Logger.i("--- Valid Saju Hanja Preview Cache Found ---")
+                return json.decodeFromString<SajuHanja>(cachedHanjaJson)
+            }
+        } catch (e: Exception) {
+            Logger.e("Failed to read saju hanja cache", e)
+        }
+
+        // Calculate Hanja 100% locally
+        val dateParts = birthDate.split("-")
+        val year = dateParts[0].toIntOrNull() ?: 1990
+        val month = dateParts[1].toIntOrNull() ?: 1
+        val day = dateParts[2].toIntOrNull() ?: 1
+        
+        val solarDate = if (isLunar) {
+            try {
+                LunarSolarConverter.convertLunarToSolar(year, month, day)
+            } catch (e: Exception) {
+                Logger.e("Lunar to Solar conversion failed, falling back to solar", e)
+                SolarDate(year, month, day)
+            }
+        } else {
+            SolarDate(year, month, day)
+        }
+
+        val pillars = SajuCalculator.calculate(
+            solarYear = solarDate.year,
+            solarMonth = solarDate.month,
+            solarDay = solarDate.day,
+            birthTime = birthTime
+        )
+
+        val newHanja = SajuHanja(
+            yearHanja = pillars.yearHanja,
+            monthHanja = pillars.monthHanja,
+            dayHanja = pillars.dayHanja,
+            hourHanja = pillars.hourHanja
+        )
+
+        try {
+            cacheManager.saveCache("saju_hanja_preview_$inputCombo", json.encodeToString(newHanja))
+            Logger.i("--- Saju Hanja Preview Cache Successfully Saved ---")
+        } catch (e: Exception) {
+            Logger.e("Failed to save saju hanja cache", e)
+        }
+
+        return newHanja
     }
 }

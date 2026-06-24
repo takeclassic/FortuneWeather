@@ -94,6 +94,11 @@ fun WeatherApp(
         }
     }
 
+    val scrollState = rememberScrollState()
+    LaunchedEffect(weatherInfo) {
+        scrollState.scrollTo(0)
+    }
+
     FortuneWeatherTheme {
         val backgroundColors = if (isNight) listOf(NightDeepBlue, NightBlackBlue) else listOf(SunnyLight, SunnyDark)
         Box(
@@ -102,7 +107,7 @@ fun WeatherApp(
                 .background(brush = Brush.verticalGradient(colors = backgroundColors))
                 .nestedScroll(pullToRefreshState.nestedScrollConnection)
         ) {
-            Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
+            Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState).padding(horizontal = 20.dp)) {
                 Spacer(modifier = Modifier.height(60.dp))
                 CurrentWeatherSection(weatherInfo, isNight)
                 Spacer(modifier = Modifier.height(24.dp))

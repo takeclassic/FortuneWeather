@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -144,6 +145,11 @@ class MainActivity : ComponentActivity() {
                 Box(modifier = Modifier.fillMaxSize()) {
                     val state = uiState
                     if (currentScreen == "fortune" && state is WeatherUiState.Success) {
+                        BackHandler {
+                            viewModel.resetSaju()
+                            currentScreen = "main"
+                        }
+                        
                         FortuneDetailScreen(
                             viewModel = viewModel,
                             onShowAd = { onAdClosed ->

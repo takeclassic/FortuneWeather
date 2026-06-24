@@ -4,7 +4,9 @@ import com.fortuneweather.data.repository.WeatherRepository
 import com.fortuneweather.domain.location.LocationTracker
 import com.fortuneweather.domain.model.WeatherInfo
 import com.fortuneweather.data.datasource.SajuFortune
+import com.fortuneweather.data.datasource.SajuHanja
 import com.fortuneweather.utils.Logger
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -41,13 +43,23 @@ class WeatherViewModel(
 
     sealed interface SajuUiState {
         object Initial : SajuUiState
-        object Loading : SajuUiState
+        data class Loading(val previewHanja: SajuHanja? = null) : SajuUiState
         data class Success(val saju: SajuFortune) : SajuUiState
         data class Error(val message: String) : SajuUiState
     }
 
     private val _sajuState = MutableStateFlow<SajuUiState>(SajuUiState.Initial)
     val sajuState: StateFlow<SajuUiState> = _sajuState.asStateFlow()
+
+    sealed interface SajuPreviewState {
+        object Empty : SajuPreviewState
+        object Loading : SajuPreviewState
+        data class Success(val hanja: SajuHanja) : SajuPreviewState
+        data class Error(val message: String) : SajuPreviewState
+    }
+
+    private val _previewHanjaState = MutableStateFlow<SajuPreviewState>(SajuPreviewState.Empty)
+    val previewHanjaState: StateFlow<SajuPreviewState> = _previewHanjaState.asStateFlow()
 
     fun loadWeather(forceRefresh: Boolean = false) {
         viewModelScope.launch {
@@ -99,18 +111,68 @@ class WeatherViewModel(
         forceRefresh: Boolean = false
     ) {
         viewModelScope.launch {
-            _sajuState.value = SajuUiState.Loading
+            _sajuState.value = SajuUiState.Loading(null)
+            
+            val isCached = if (!forceRefresh) {
+                repository.isSajuFortuneCached(birthDate, birthTime, isLunar, gender)
+            } else {
+                false
+            }
+
+            if (isCached) {
+                try {
+                    val saju = repository.getSajuFortune(
+                        birthDate = birthDate,
+                        birthTime = birthTime,
+                        isLunar = isLunar,
+                        gender = gender,
+                        forceRefresh = false
+                    )
+                    _sajuState.value = SajuUiState.Success(saju)
+                    return@launch
+                } catch (e: Exception) {
+                    Logger.e("Failed to load cached Saju", e)
+                }
+            }
+
             try {
-                val saju = repository.getSajuFortune(
-                    birthDate = birthDate,
-                    birthTime = birthTime,
-                    isLunar = isLunar,
-                    gender = gender,
-                    forceRefresh = forceRefresh
-                )
-                _sajuState.value = SajuUiState.Success(saju)
+                coroutineScope {
+                    launch {
+                        try {
+                            val hanja = repository.getSajuHanjaOnly(
+                                birthDate = birthDate,
+                                birthTime = birthTime,
+                                isLunar = isLunar,
+                                gender = gender
+                            )
+                            _previewHanjaState.value = SajuPreviewState.Success(hanja)
+                            val currentState = _sajuState.value
+                            if (currentState is SajuUiState.Loading) {
+                                _sajuState.value = SajuUiState.Loading(hanja)
+                            }
+                        } catch (e: Exception) {
+                            Logger.e("Failed to load Saju Hanja Preview", e)
+                        }
+                    }
+
+                    launch {
+                        try {
+                            val saju = repository.getSajuFortune(
+                                birthDate = birthDate,
+                                birthTime = birthTime,
+                                isLunar = isLunar,
+                                gender = gender,
+                                forceRefresh = forceRefresh
+                            )
+                            _sajuState.value = SajuUiState.Success(saju)
+                        } catch (e: Exception) {
+                            Logger.e("Failed to load Saju fortune", e)
+                            _sajuState.value = SajuUiState.Error(e.message ?: "사주 분석 중 오류가 발생했습니다.")
+                        }
+                    }
+                }
             } catch (e: Exception) {
-                Logger.e("Failed to load Saju fortune", e)
+                Logger.e("Failed in loadSajuFortune scope", e)
                 _sajuState.value = SajuUiState.Error(e.message ?: "사주 분석 중 오류가 발생했습니다.")
             }
         }
@@ -118,6 +180,35 @@ class WeatherViewModel(
 
     fun resetSaju() {
         _sajuState.value = SajuUiState.Initial
+        _previewHanjaState.value = SajuPreviewState.Empty
+    }
+
+    fun prefetchSajuHanja(
+        birthDate: String,
+        birthTime: String,
+        isLunar: Boolean,
+        gender: String
+    ) {
+        _previewHanjaState.value = SajuPreviewState.Loading
+        viewModelScope.launch {
+            try {
+                val hanja = repository.getSajuHanjaOnly(
+                    birthDate = birthDate,
+                    birthTime = birthTime,
+                    isLunar = isLunar,
+                    gender = gender
+                )
+                _previewHanjaState.value = SajuPreviewState.Success(hanja)
+                Logger.i("Prefetched Saju Hanja: $hanja")
+            } catch (e: Exception) {
+                Logger.e("Failed to prefetch Saju Hanja", e)
+                _previewHanjaState.value = SajuPreviewState.Error(e.message ?: "사주팔자 조회 실패")
+            }
+        }
+    }
+
+    fun clearPreviewHanja() {
+        _previewHanjaState.value = SajuPreviewState.Empty
     }
 
     /** ViewModel이 더 이상 필요 없을 때 호출해 내부 coroutine들을 취소한다. */
