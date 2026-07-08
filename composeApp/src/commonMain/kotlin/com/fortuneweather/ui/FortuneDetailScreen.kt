@@ -73,8 +73,21 @@ fun FortuneDetailScreen(
 
     val sajuState by viewModel.sajuState.collectAsState()
 
+    val todayDateStr = remember {
+        val today = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+        "${today.year}-${today.monthNumber}-${today.dayOfMonth}"
+    }
+
+    // 날짜가 기기 타임존 기준으로 바뀌었는지 확인하여 변경 시 사주 상태 초기화
+    LaunchedEffect(todayDateStr) {
+        val cachedDate = CacheManager.getCache("saju_result_date")
+        if (cachedDate != todayDateStr) {
+            viewModel.resetSaju()
+        }
+    }
+
     // 동의가 되어 있고, 생년월일이 등록되어 있으며, 아직 로드하지 않은 상태이고 편집 중이 아니라면 자동 로드 실행
-    LaunchedEffect(isConsentGranted, birthDate) {
+    LaunchedEffect(isConsentGranted, birthDate, todayDateStr) {
         if (isConsentGranted && birthDate.length == 8 && !isEditing && sajuState is WeatherViewModel.SajuUiState.Initial) {
             val formattedDate = "${birthDate.substring(0, 4)}-${birthDate.substring(4, 6)}-${birthDate.substring(6, 8)}"
             val formattedTime = if (isTimeUnknown) "모름" else {
