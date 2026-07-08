@@ -13,6 +13,8 @@ import com.fortuneweather.utils.SolarDate
 import com.fortuneweather.domain.model.RawWeatherData
 import com.fortuneweather.domain.model.WeatherCache
 import com.fortuneweather.domain.model.WeatherInfo
+import com.fortuneweather.domain.model.HourlyForecast
+import com.fortuneweather.domain.model.DailyForecast
 import com.fortuneweather.utils.Logger
 import com.fortuneweather.utils.SunTimes
 import com.fortuneweather.utils.WeatherConstants
@@ -105,28 +107,100 @@ class WeatherRepository(
         lon: Double,
         addressName: String?
     ): WeatherInfo = coroutineScope {
-        // 1. 완전히 독립적인 API 4개를 병렬로 조회 개시
+        // 1. 모든 독립적인 API를 동시에 병렬로 조회 시작!
         val owmAirDef = async { owmDataSource.fetchOwmAirPollutionForecast(lat, lon) }
         val realtimeDef = async { kmaDataSource.fetchKmaRealtimeWeather(lat, lon) }
         val stationDef = async { kmaDataSource.fetchNearestStation(lat, lon) }
         val uvDef = async { kmaDataSource.fetchKmaUvIndex(addressName) }
+        val kma24HourForecastDef = async { kmaDataSource.fetchKma24HourForecast(lat, lon) }
+        val owmResultDef = async { owmDataSource.fetchOwmForecast(lat, lon) }
 
         // 2. 관측소 정보가 오면 바로 이어서 에어코리아 미세먼지 조회를 비동기로 실행
         val stationName = stationDef.await()
         val aqiDef = async { airKoreaDataSource.fetchAirKoreaDetails(stationName) }
         val locationName = stationName
 
-        // 3. 미세먼지 예보(owmAirList) 데이터를 토대로 기상청 24시간 단기예보 조회 실행
+        // 3. 결과 수집
         val owmAirList = owmAirDef.await()
-        val kma24HourForecast = kmaDataSource.fetchKma24HourForecast(lat, lon, owmAirList)
-        
-        // 4. 나머지 비동기 결과 수집 완료 후, 최종 OpenWeatherMap 5일 예보 조회 진행
         val realtime = realtimeDef.await()
+        val rawKma24HourForecast = kma24HourForecastDef.await()
+        val rawOwmResult = owmResultDef.await()
         val aqiData = aqiDef.await()
-        val owmResult = owmDataSource.fetchOwmForecast(lat, lon, owmAirList, kma24HourForecast)
-        
+        val kmaUv = uvDef.await()
+
         val now = Clock.System.now().toLocalDateTime(systemZone)
-        val finalDailyList = owmResult.dailyList
+
+        // 4. 수집된 데이터를 바탕으로 병합 및 조인(Join) 처리
+        // 4-1. AQI 맵 생성
+        val owmAqiMap = owmAirList.associate { item ->
+            val instant = Instant.fromEpochSeconds(item.dt)
+            val localDateTime = instant.toLocalDateTime(systemZone)
+            val key = "${localDateTime.year}" +
+                "${localDateTime.monthNumber.toString().padStart(2, '0')}" +
+                "${localDateTime.dayOfMonth.toString().padStart(2, '0')}" +
+                "${localDateTime.hour.toString().padStart(2, '0')}00"
+            key to item.components.pm10.toInt()
+        }
+        val simulatedHourlyAqiMap = owmAirList.associate { item ->
+            val instant = Instant.fromEpochSeconds(item.dt)
+            val localDateTime = instant.toLocalDateTime(systemZone)
+            "${getDateStr(localDateTime.date)} ${localDateTime.hour.toString().padStart(2, '0')}" to item.components.pm10.toInt()
+        }
+
+        // 4-2. 기상청 단기예보의 Hourly 및 Daily에 AQI 데이터를 결합
+        val mappedKmaHourly = rawKma24HourForecast.hourly.map { hourly ->
+            val aqiVal = hourly.rawTime?.let { owmAqiMap[it] } ?: 0
+            hourly.copy(aqi = aqiVal)
+        }
+        val mappedKmaDaily = rawKma24HourForecast.daily.map { daily ->
+            val dateStr = daily.rawDate?.replace("-", "") ?: ""
+            val aqiVal = owmAqiMap[dateStr] ?: 0
+            daily.copy(aqi = aqiVal)
+        }
+        val kma24HourForecast = rawKma24HourForecast.copy(
+            hourly = mappedKmaHourly,
+            daily = mappedKmaDaily
+        )
+
+        // 4-3. 국내용 최종 dailyList 조립 (첫날은 기상청, 2~5일은 OWM에 AQI 융합)
+        val today = now.date
+        val todayAqi = aqiData.pm10 // 에어코리아 실시간 미세먼지 수치를 오늘 AQI 지수로 사용
+        
+        val dailyList = mutableListOf<DailyForecast>()
+        if (kma24HourForecast.daily.isNotEmpty()) {
+            dailyList.add(createFirstDayKmaForecast(today, kma24HourForecast, todayAqi))
+            for (i in 1 until rawOwmResult.dailyList.size) {
+                val owmDaily = rawOwmResult.dailyList[i]
+                val dateStr = owmDaily.rawDate ?: ""
+                val dayAqi = owmAqiMap[dateStr] ?: 0
+                val mappedHourly = owmDaily.hourlyDetails.map { hourly ->
+                    val hourInt = hourly.time.replace("시", "").trim().toIntOrNull() ?: 12
+                    val hourStr = hourInt.toString().padStart(2, '0')
+                    val hourAqiKey = "$dateStr $hourStr"
+                    val hourAqi = simulatedHourlyAqiMap[hourAqiKey] ?: dayAqi
+                    hourly.copy(aqi = hourAqi)
+                }
+                dailyList.add(owmDaily.copy(aqi = dayAqi, hourlyDetails = mappedHourly))
+            }
+        } else {
+            // 기상청 예보가 실패한 경우 OWM 데이터로 5일치를 전부 융합하여 채움
+            for (i in 0 until rawOwmResult.dailyList.size) {
+                val owmDaily = rawOwmResult.dailyList[i]
+                val dateStr = owmDaily.rawDate ?: ""
+                val dayAqi = owmAqiMap[dateStr] ?: 0
+                val mappedHourly = owmDaily.hourlyDetails.map { hourly ->
+                    val hourInt = hourly.time.replace("시", "").trim().toIntOrNull() ?: 12
+                    val hourStr = hourInt.toString().padStart(2, '0')
+                    val hourAqiKey = "$dateStr $hourStr"
+                    val hourAqi = simulatedHourlyAqiMap[hourAqiKey] ?: dayAqi
+                    hourly.copy(aqi = hourAqi)
+                }
+                dailyList.add(owmDaily.copy(aqi = dayAqi, hourlyDetails = mappedHourly))
+            }
+        }
+
+        val finalDailyList = dailyList
+        val finalHourlyList = kma24HourForecast.hourly
 
         // 센티넬 값 및 NO_DATA 값을 기준으로 국내 기상 데이터 통합
         val finalTemp = if (realtime.temp != WeatherConstants.TEMP_UNKNOWN) {
@@ -146,19 +220,18 @@ class WeatherRepository(
         val pm25Val = aqiData.pm25
         val aqiVal = aqiData.khaiValue
 
-        val kmaUv = uvDef.await()
         val uvVal = kmaUv ?: calculateUvIndex(now, finalCondition)
         val phase = calculateMoonPhase()
 
         val windSpeedVal = if (realtime.windSpeed != WeatherConstants.DOUBLE_UNKNOWN) {
             realtime.windSpeed
         } else {
-            if (owmResult.currentWindSpeed != WeatherConstants.DOUBLE_UNKNOWN) owmResult.currentWindSpeed else 0.0
+            if (rawOwmResult.currentWindSpeed != WeatherConstants.DOUBLE_UNKNOWN) rawOwmResult.currentWindSpeed else 0.0
         }
         val rainAmountVal = if (realtime.rainAmount != WeatherConstants.DOUBLE_UNKNOWN) {
             realtime.rainAmount
         } else {
-            if (owmResult.currentRain != WeatherConstants.DOUBLE_UNKNOWN) owmResult.currentRain else 0.0
+            if (rawOwmResult.currentRain != WeatherConstants.DOUBLE_UNKNOWN) rawOwmResult.currentRain else 0.0
         }
         
         val finalHumidity = if (realtime.humidity != WeatherConstants.INT_UNKNOWN) {
@@ -174,16 +247,15 @@ class WeatherRepository(
         }
 
         val feelsLikeVal = calculateFeelsLike(finalTemp, windSpeedVal, finalHumidity)
-        val finalHourlyList = kma24HourForecast.hourly
 
-        val finalVisibility = if (owmResult.currentVisibility != WeatherConstants.DOUBLE_UNKNOWN) {
-            owmResult.currentVisibility
+        val finalVisibility = if (rawOwmResult.currentVisibility != WeatherConstants.DOUBLE_UNKNOWN) {
+            rawOwmResult.currentVisibility
         } else {
             WeatherConstants.PLACEHOLDER_VISIBILITY
         }
 
-        val finalPressure = if (owmResult.currentPressure != WeatherConstants.DOUBLE_UNKNOWN) {
-            owmResult.currentPressure
+        val finalPressure = if (rawOwmResult.currentPressure != WeatherConstants.DOUBLE_UNKNOWN) {
+            rawOwmResult.currentPressure
         } else {
             WeatherConstants.PLACEHOLDER_PRESSURE
         }
@@ -206,17 +278,54 @@ class WeatherRepository(
         lat: Double,
         lon: Double
     ): WeatherInfo = coroutineScope {
-        // 해외 조회 시, 순차적인 흐름을 타므로 불필요한 async-await 코루틴 분기 처리를 걷어내고 
-        // 다이렉트로 suspend 호출을 진행하여 불필요한 리소스 낭비를 차단합니다.
-        val owmAirList = owmDataSource.fetchOwmAirPollutionForecast(lat, lon)
-        val owmResult = owmDataSource.fetchOwmForecast(lat, lon, owmAirList, RawWeatherData())
+        val owmAirDef = async { owmDataSource.fetchOwmAirPollutionForecast(lat, lon) }
+        val owmResultDef = async { owmDataSource.fetchOwmForecast(lat, lon) }
         
-        val locationName = owmResult.cityName
-        val now = Clock.System.now().toLocalDateTime(systemZone)
-        val finalDailyList = owmResult.dailyList
+        val owmAirList = owmAirDef.await()
+        val rawOwmResult = owmResultDef.await()
 
-        val finalTemp = if (owmResult.currentTemp != WeatherConstants.TEMP_UNKNOWN) owmResult.currentTemp else 0.0
-        val finalCondition = if (owmResult.currentCondition != WeatherConstants.NO_DATA) owmResult.currentCondition else WeatherConstants.DEFAULT_CONDITION
+        val locationName = rawOwmResult.cityName
+        val now = Clock.System.now().toLocalDateTime(systemZone)
+
+        val owmAqiMap = owmAirList.associate { item ->
+            val instant = Instant.fromEpochSeconds(item.dt)
+            val localDateTime = instant.toLocalDateTime(systemZone)
+            getDateStr(localDateTime.date) to item.components.pm10.toInt()
+        }
+        val simulatedHourlyAqiMap = owmAirList.associate { item ->
+            val instant = Instant.fromEpochSeconds(item.dt)
+            val localDateTime = instant.toLocalDateTime(systemZone)
+            "${getDateStr(localDateTime.date)} ${localDateTime.hour.toString().padStart(2, '0')}" to item.components.pm10.toInt()
+        }
+
+        // daily와 hourly에 AQI를 채워넣기
+        val finalDailyList = rawOwmResult.dailyList.map { daily ->
+            val dateStr = daily.rawDate ?: ""
+            val dayAqi = owmAqiMap[dateStr] ?: 0
+            val mappedHourly = daily.hourlyDetails.map { hourly ->
+                val hourInt = hourly.time.replace("시", "").trim().toIntOrNull() ?: 12
+                val hourStr = hourInt.toString().padStart(2, '0')
+                val hourAqiKey = "$dateStr $hourStr"
+                val hourAqi = simulatedHourlyAqiMap[hourAqiKey] ?: dayAqi
+                hourly.copy(aqi = hourAqi)
+            }
+            daily.copy(aqi = dayAqi, hourlyDetails = mappedHourly)
+        }
+
+        val finalHourlyList = rawOwmResult.hourlyList.map { hourly ->
+            val hourKey = hourly.rawTime?.let { 
+                val yr = it.substring(0, 4)
+                val mn = it.substring(4, 6)
+                val dy = it.substring(6, 8)
+                val hr = it.substring(8, 10)
+                "$yr-$mn-$dy $hr"
+            }
+            val aqiVal = hourKey?.let { simulatedHourlyAqiMap[it] } ?: 0
+            hourly.copy(aqi = aqiVal)
+        }
+
+        val finalTemp = if (rawOwmResult.currentTemp != WeatherConstants.TEMP_UNKNOWN) rawOwmResult.currentTemp else 0.0
+        val finalCondition = if (rawOwmResult.currentCondition != WeatherConstants.NO_DATA) rawOwmResult.currentCondition else WeatherConstants.DEFAULT_CONDITION
         val sunTimes = SunTimes.calculate(lat, lon, now.date)
 
         val pm10Val = owmAirList.firstOrNull()?.components?.pm10?.toInt() ?: 0
@@ -233,22 +342,21 @@ class WeatherRepository(
         val uvVal = calculateUvIndex(now, finalCondition)
         val phase = calculateMoonPhase()
 
-        val windSpeedVal = if (owmResult.currentWindSpeed != WeatherConstants.DOUBLE_UNKNOWN) owmResult.currentWindSpeed else 0.0
-        val rainAmountVal = if (owmResult.currentRain != WeatherConstants.DOUBLE_UNKNOWN) owmResult.currentRain else 0.0
-        val finalHumidity = if (owmResult.currentHumidity != WeatherConstants.INT_UNKNOWN) owmResult.currentHumidity else WeatherConstants.DEFAULT_HUMIDITY
-        val windDirectionVal = WeatherConstants.degreeToDirection(owmResult.currentWindDeg)
+        val windSpeedVal = if (rawOwmResult.currentWindSpeed != WeatherConstants.DOUBLE_UNKNOWN) rawOwmResult.currentWindSpeed else 0.0
+        val rainAmountVal = if (rawOwmResult.currentRain != WeatherConstants.DOUBLE_UNKNOWN) rawOwmResult.currentRain else 0.0
+        val finalHumidity = if (rawOwmResult.currentHumidity != WeatherConstants.INT_UNKNOWN) rawOwmResult.currentHumidity else WeatherConstants.DEFAULT_HUMIDITY
+        val windDirectionVal = WeatherConstants.degreeToDirection(rawOwmResult.currentWindDeg)
 
         val feelsLikeVal = calculateFeelsLike(finalTemp, windSpeedVal, finalHumidity)
-        val finalHourlyList = owmResult.hourlyList
 
-        val finalVisibility = if (owmResult.currentVisibility != WeatherConstants.DOUBLE_UNKNOWN) {
-            owmResult.currentVisibility
+        val finalVisibility = if (rawOwmResult.currentVisibility != WeatherConstants.DOUBLE_UNKNOWN) {
+            rawOwmResult.currentVisibility
         } else {
             WeatherConstants.PLACEHOLDER_VISIBILITY
         }
 
-        val finalPressure = if (owmResult.currentPressure != WeatherConstants.DOUBLE_UNKNOWN) {
-            owmResult.currentPressure
+        val finalPressure = if (rawOwmResult.currentPressure != WeatherConstants.DOUBLE_UNKNOWN) {
+            rawOwmResult.currentPressure
         } else {
             WeatherConstants.PLACEHOLDER_PRESSURE
         }
@@ -264,6 +372,73 @@ class WeatherRepository(
             luckyColor = calculateLuckyColor(finalTemp, finalCondition), fashionTip = getFashionRecommendation(finalTemp),
             fortuneMsg = "글로벌 기상 예보가 업데이트되었습니다.",
             sourceCount = 1
+        )
+    }
+
+    private fun getDateStr(localDate: LocalDate): String {
+        return "${localDate.year}-${localDate.monthNumber.toString().padStart(2, '0')}-${localDate.dayOfMonth.toString().padStart(2, '0')}"
+    }
+
+    private fun parseKoreanHour(timeStr: String): Int {
+        val isPm = timeStr.contains("오후")
+        val rawHour = timeStr
+            .substringAfter(if (isPm) "오후 " else "오전 ")
+            .substringBefore("시")
+            .trim()
+            .toIntOrNull() ?: 12
+        return if (isPm) {
+            if (rawHour == 12) 12 else rawHour + 12
+        } else {
+            if (rawHour == 12) 0 else rawHour
+        }
+    }
+
+    private fun createFirstDayKmaForecast(
+        today: LocalDate,
+        kma24HourForecast: RawWeatherData,
+        dayAqi: Int
+    ): DailyForecast {
+        val dateKey = "${today.monthNumber}/${today.dayOfMonth}"
+        val kmaToday = kma24HourForecast.daily.firstOrNull { it.date == dateKey }
+            ?: kma24HourForecast.daily.firstOrNull()
+
+        val minTemp = kmaToday?.minTemp ?: 0.0
+        val maxTemp = kmaToday?.maxTemp ?: 0.0
+        val pop = kmaToday?.precipitationProbability ?: 0
+        val morningCond = kmaToday?.morningCondition ?: WeatherConstants.DEFAULT_CONDITION
+        val afternoonCond = kmaToday?.afternoonCondition ?: WeatherConstants.DEFAULT_CONDITION
+
+        val targetHours = listOf(6, 9, 12, 15, 18, 21, 24)
+        val hourlyDetails = targetHours.mapNotNull { targetHour ->
+            val itemHour = if (targetHour == 24) 0 else targetHour
+
+            val matchKma = kma24HourForecast.hourly.firstOrNull { item ->
+                parseKoreanHour(item.time) == itemHour
+            } ?: kma24HourForecast.hourly.minByOrNull { item ->
+                abs(parseKoreanHour(item.time) - itemHour)
+            } ?: return@mapNotNull null
+
+            val displayTime = "${targetHour.toString().padStart(2, '0')}시"
+            HourlyForecast(
+                time = displayTime,
+                temp = matchKma.temp,
+                condition = matchKma.condition,
+                precipitationProbability = matchKma.precipitationProbability,
+                aqi = matchKma.aqi
+            )
+        }
+
+        return DailyForecast(
+            date = dateKey,
+            dayOfWeek = "오늘",
+            precipitationProbability = pop,
+            morningCondition = morningCond,
+            afternoonCondition = afternoonCond,
+            minTemp = minTemp,
+            maxTemp = maxTemp,
+            aqi = dayAqi,
+            hourlyDetails = hourlyDetails,
+            rawDate = getDateStr(today)
         )
     }
 

@@ -1,3 +1,4 @@
+@file:OptIn(org.jetbrains.compose.resources.ExperimentalResourceApi::class)
 package com.fortuneweather.ui
 
 import android.annotation.SuppressLint
@@ -40,14 +41,31 @@ import com.fortuneweather.ui.theme.*
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.foundation.Image
+import org.jetbrains.compose.resources.DrawableResource
+import org.jetbrains.compose.resources.painterResource
+import fortuneweather.composeapp.generated.resources.Res
+import fortuneweather.composeapp.generated.resources.aqi_good
 
 import kotlinx.datetime.*
 
-private fun aqiClassification(aqi: Int): Triple<String, Color, String> = when {
-    aqi <= 30 -> Triple("좋음", Color(0xFF4CAF50), "😊")
-    aqi <= 80 -> Triple("보통", Color(0xFFFFC107), "😐")
-    aqi <= 150 -> Triple("나쁨", Color(0xFFFF9800), "😷")
-    else -> Triple("매우나쁨", Color(0xFFF44336), "🤢")
+private fun aqiClassification(aqi: Int, isNight: Boolean): Triple<String, Color, Pair<DrawableResource?, String>> = when {
+    aqi <= 30 -> {
+        val color = if (isNight) AqiGood else Color(0xFF1B5E20) // 낮(밝은 하늘색)에는 진한 초록색
+        Triple("좋음", color, Pair(Res.drawable.aqi_good, "😊"))
+    }
+    aqi <= 80 -> {
+        val color = if (isNight) AqiModerate else Color(0xFFC49000) // 낮에는 어두운 황색
+        Triple("보통", color, Pair(null, "😐"))
+    }
+    aqi <= 150 -> {
+        val color = if (isNight) AqiBad else Color(0xFFE65100) // 낮에는 어두운 주황색
+        Triple("나쁨", color, Pair(null, "😷"))
+    }
+    else -> {
+        val color = if (isNight) AqiVeryBad else Color(0xFFB71C1C) // 낮에는 어두운 적색
+        Triple("매우나쁨", color, Pair(null, "🤢"))
+    }
 }
 
 private fun isNightTime(sunrise: String, sunset: String, now: LocalDateTime): Boolean {
@@ -69,7 +87,8 @@ fun WeatherApp(
     weatherInfo: WeatherInfo,
     isRefreshing: Boolean,
     onRefresh: () -> Unit,
-    onFortuneClick: () -> Unit
+    onFortuneClick: () -> Unit,
+    onFashionClick: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState()
     var sheetType by remember { mutableStateOf("fortune") }
@@ -111,13 +130,13 @@ fun WeatherApp(
                 Spacer(modifier = Modifier.height(60.dp))
                 CurrentWeatherSection(weatherInfo, isNight)
                 Spacer(modifier = Modifier.height(24.dp))
-                ActionButtons(onFortuneClick = onFortuneClick, onFashionClick = { sheetType = "fashion"; showBottomSheet = true })
+                ActionButtons(onFortuneClick = onFortuneClick, onFashionClick = onFashionClick)
                 Spacer(modifier = Modifier.height(32.dp))
                 SectionTitle("24시간 예보")
-                HourlyForecastSection(weatherInfo)
+                HourlyForecastSection(weatherInfo, isNight)
                 Spacer(modifier = Modifier.height(30.dp))
                 SectionTitle("5일간의 날씨")
-                DailyForecastSection(weatherInfo)
+                DailyForecastSection(weatherInfo, isNight)
                 Spacer(modifier = Modifier.height(30.dp))
                 SectionTitle("상세 정보")
                 WeatherDetailGrid(weatherInfo)
@@ -145,11 +164,11 @@ fun WeatherApp(
 }
 
 @Composable
-fun DailyForecastSection(info: WeatherInfo) {
+fun DailyForecastSection(info: WeatherInfo, isNight: Boolean) {
     Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = WhiteTrans15), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp), modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             info.daily.forEach { item ->
-                DailyForecastItem(item)
+                DailyForecastItem(item, isNight)
                 if (info.daily.last() != item) HorizontalDivider(color = WhiteTrans10, thickness = 0.5.dp)
             }
         }
@@ -158,7 +177,7 @@ fun DailyForecastSection(info: WeatherInfo) {
 
 @SuppressLint("UnusedBoxWithConstraintsScope")
 @Composable
-fun DailyForecastItem(item: DailyForecast) {
+fun DailyForecastItem(item: DailyForecast, isNight: Boolean) {
     var isExpanded by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxWidth().animateContentSize().clickable { isExpanded = !isExpanded }) {
@@ -177,9 +196,18 @@ fun DailyForecastItem(item: DailyForecast) {
                 }
                 
                 // 3. 미세먼지 등급 표기
-                val (aqiText, aqiColor, aqiEmoji) = aqiClassification(item.aqi)
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.width(50.dp)) {
-                    Text(text = aqiEmoji, fontSize = 9.sp, modifier = Modifier.padding(end = 1.dp))
+                val (aqiText, aqiColor, aqiAsset) = aqiClassification(item.aqi, isNight)
+                val (aqiIcon, fallbackEmoji) = aqiAsset
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.width(56.dp)) {
+                    if (aqiIcon != null) {
+                        Image(
+                            painter = painterResource(aqiIcon),
+                            contentDescription = aqiText,
+                            modifier = Modifier.size(14.dp).padding(end = 2.dp)
+                        )
+                    } else {
+                        Text(text = fallbackEmoji, fontSize = 9.sp, modifier = Modifier.padding(end = 2.dp))
+                    }
                     Text(text = aqiText, color = aqiColor, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 }
                 
@@ -337,7 +365,7 @@ fun DailyForecastItem(item: DailyForecast) {
 }
 
 @Composable
-fun HourlyForecastSection(info: WeatherInfo) {
+fun HourlyForecastSection(info: WeatherInfo, isNight: Boolean) {
     Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = WhiteTrans10), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp), modifier = Modifier.fillMaxWidth().wrapContentHeight()) {
         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             items(info.hourly) { item ->
@@ -367,10 +395,19 @@ fun HourlyForecastSection(info: WeatherInfo) {
                         Text(text = "${item.precipitationProbability}%", color = WhiteTrans80, fontSize = 9.sp, style = MaterialTheme.typography.bodySmall)
                     }
                     Spacer(modifier = Modifier.height(2.dp))
-                    val (aqiText, aqiColor, aqiEmoji) = aqiClassification(item.aqi)
+                    val (aqiText, aqiColor, aqiAsset) = aqiClassification(item.aqi, isNight)
+                    val (aqiIcon, fallbackEmoji) = aqiAsset
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = aqiEmoji, fontSize = 8.sp, modifier = Modifier.padding(end = 2.dp))
-                        Text(text = "$aqiText(${item.aqi})", color = aqiColor, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                        if (aqiIcon != null) {
+                            Image(
+                                painter = painterResource(aqiIcon),
+                                contentDescription = aqiText,
+                                modifier = Modifier.size(12.dp).padding(end = 2.dp)
+                            )
+                        } else {
+                            Text(text = fallbackEmoji, fontSize = 8.sp, modifier = Modifier.padding(end = 2.dp))
+                        }
+                        Text(text = aqiText, color = aqiColor, fontSize = 8.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -388,8 +425,18 @@ fun CurrentWeatherSection(info: WeatherInfo, isNight: Boolean) {
         Text("${info.temp.toInt()}°", style = MaterialTheme.typography.displayLarge, color = Color.White)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("미세먼지 ", style = MaterialTheme.typography.bodyMedium, color = WhiteTrans80)
-            val (text, color, emoji) = aqiClassification(info.aqi)
-            Text("$emoji $text(${info.aqi})", color = color, style = MaterialTheme.typography.bodyLarge)
+            val (text, color, aqiAsset) = aqiClassification(info.aqi, isNight)
+            val (aqiIcon, fallbackEmoji) = aqiAsset
+            if (aqiIcon != null) {
+                Image(
+                    painter = painterResource(aqiIcon),
+                    contentDescription = text,
+                    modifier = Modifier.size(24.dp).padding(end = 4.dp)
+                )
+            } else {
+                Text(text = "$fallbackEmoji ", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(end = 4.dp))
+            }
+            Text("$text (${info.aqi})", color = color, style = MaterialTheme.typography.bodyLarge)
         }
     }
 }

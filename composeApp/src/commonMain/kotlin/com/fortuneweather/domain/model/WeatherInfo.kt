@@ -9,7 +9,8 @@ data class HourlyForecast(
     val temp: Double,
     val condition: String = WeatherConstants.NO_DATA,
     val precipitationProbability: Int = 0,
-    val aqi: Int = 0
+    val aqi: Int = 0,
+    val rawTime: String? = null
 )
 
 @Serializable
@@ -22,7 +23,8 @@ data class DailyForecast(
     val minTemp: Double,
     val maxTemp: Double,
     val aqi: Int = 0,
-    val hourlyDetails: List<HourlyForecast> = emptyList()
+    val hourlyDetails: List<HourlyForecast> = emptyList(),
+    val rawDate: String? = null
 )
 
 @Serializable

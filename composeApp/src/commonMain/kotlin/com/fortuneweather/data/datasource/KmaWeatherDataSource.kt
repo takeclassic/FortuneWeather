@@ -77,7 +77,7 @@ class KmaWeatherDataSource(client: HttpClient) : BaseRemoteDataSource(client) {
         }
     }
 
-    suspend fun fetchKma24HourForecast(lat: Double, lon: Double, owmAirList: List<OwmAirPollutionItem>): RawWeatherData {
+    suspend fun fetchKma24HourForecast(lat: Double, lon: Double): RawWeatherData {
         return try {
             val grid = LatLonToGrid.convert(lat, lon)
             val (baseDate, baseTime) = getKmaForecastBaseTime()
@@ -88,16 +88,6 @@ class KmaWeatherDataSource(client: HttpClient) : BaseRemoteDataSource(client) {
             if (items.isEmpty()) {
                 RawWeatherData()
             } else {
-                val owmAqiMap = owmAirList.associate { item ->
-                    val instant = Instant.fromEpochSeconds(item.dt)
-                    val localDateTime = instant.toLocalDateTime(kstZone)
-                    val key = "${localDateTime.year}" +
-                        "${localDateTime.monthNumber.toString().padStart(2, '0')}" +
-                        "${localDateTime.dayOfMonth.toString().padStart(2, '0')}" +
-                        "${localDateTime.hour.toString().padStart(2, '0')}00"
-                    key to item.components.pm10.toInt()
-                }
-
                 val now = Clock.System.now().toLocalDateTime(kstZone)
                 val hourGroups = items.groupBy { (it.fcstDate ?: "") + (it.fcstTime ?: "") }
                 val nowKey = "${now.year}" +
@@ -120,7 +110,6 @@ class KmaWeatherDataSource(client: HttpClient) : BaseRemoteDataSource(client) {
                     val sky = group.find { it.category == "SKY" }?.fcstValue ?: "1"
                     val pty = group.find { it.category == "PTY" }?.fcstValue ?: "0"
                     val pop = group.find { it.category == "POP" }?.fcstValue?.toIntOrNull() ?: 0
-                    val pm10Val = owmAqiMap[key] ?: 0
                     val condition = if (pty != "0") {
                         WeatherConstants.ptyToCondition(pty)
                     } else {
@@ -131,7 +120,8 @@ class KmaWeatherDataSource(client: HttpClient) : BaseRemoteDataSource(client) {
                         temp = group.find { it.category == "TMP" }?.fcstValue?.toDoubleOrNull() ?: 0.0,
                         condition = condition,
                         precipitationProbability = pop,
-                        aqi = pm10Val
+                        aqi = 0,
+                        rawTime = key
                     )
                 }
 
@@ -168,6 +158,8 @@ class KmaWeatherDataSource(client: HttpClient) : BaseRemoteDataSource(client) {
                         .map { it.fcstValue.toDoubleOrNull() ?: 0.0 }
                         .maxOrNull() ?: 0.0
 
+                    val formattedDateStr = "${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}"
+
                     DailyForecast(
                         date = "${month}/${day}",
                         dayOfWeek = "",
@@ -175,7 +167,8 @@ class KmaWeatherDataSource(client: HttpClient) : BaseRemoteDataSource(client) {
                         morningCondition = getBestCond(0, 12),
                         afternoonCondition = getBestCond(12, 24),
                         minTemp = minTemp,
-                        maxTemp = maxTemp
+                        maxTemp = maxTemp,
+                        rawDate = formattedDateStr
                     )
                 }
 

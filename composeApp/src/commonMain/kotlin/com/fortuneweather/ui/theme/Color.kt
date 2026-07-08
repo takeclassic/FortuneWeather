@@ -15,10 +15,10 @@ val ErrorLight = Color(0xFFE57373)
 val ErrorDark = Color(0xFFC62828)
 
 // AQI Colors
-val AqiGood = Color(0xFF81C784)
-val AqiModerate = Color(0xFFFFD54F)
-val AqiBad = Color(0xFFFFB74D)
-val AqiVeryBad = Color(0xFFE57373)
+val AqiGood = Color(0xFF00E676)       // Vibrant Neon Green (초록색 시인성 극대화)
+val AqiModerate = Color(0xFFFFD600)   // Vibrant Bright Yellow
+val AqiBad = Color(0xFFFF9100)        // Vibrant Accent Orange
+val AqiVeryBad = Color(0xFFFF1744)    // Vibrant Crimson Red
 
 // Button & Accent Colors
 val FortuneGold = Color(0xFFFFD54F)

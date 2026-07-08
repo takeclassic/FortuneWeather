@@ -28,9 +28,7 @@ class OwmWeatherDataSource(client: HttpClient) : BaseRemoteDataSource(client) {
 
     suspend fun fetchOwmForecast(
         lat: Double,
-        lon: Double,
-        owmAirList: List<OwmAirPollutionItem>,
-        kma24HourForecast: RawWeatherData
+        lon: Double
     ): OwmForecastResult {
         return try {
             val url = "http://api.openweathermap.org/data/2.5/forecast?lat=$lat&lon=$lon&appid=$apiKey&units=metric&lang=kr"
@@ -46,44 +44,16 @@ class OwmWeatherDataSource(client: HttpClient) : BaseRemoteDataSource(client) {
                 getDateStr(localDateTime.date)
             }
 
-            val owmAqiMap = owmAirList.associate { item ->
-                val instant = Instant.fromEpochSeconds(item.dt)
-                val localDateTime = instant.toLocalDateTime(systemZone)
-                getDateStr(localDateTime.date) to item.components.pm10.toInt()
-            }
-
-            val simulatedHourlyAqiMap = owmAirList.associate { item ->
-                val instant = Instant.fromEpochSeconds(item.dt)
-                val localDateTime = instant.toLocalDateTime(systemZone)
-                "${getDateStr(localDateTime.date)} ${localDateTime.hour.toString().padStart(2, '0')}" to item.components.pm10.toInt()
-            }
-
             val today = Clock.System.now().toLocalDateTime(systemZone).date
             val targetDates = (0..4).map { today.plus(it, DateTimeUnit.DAY) }
 
             val dailyList = mutableListOf<DailyForecast>()
-            val todayAqi = owmAqiMap[getDateStr(today)] ?: 0
 
-            // 국내 위치이고 유효한 KMA 기상예보가 존재할 때 (임시 RawWeatherData가 아닌 실제 값이 들어왔는지 체크)
-            if (kma24HourForecast.locationName.isNotEmpty() || kma24HourForecast.hourly.isNotEmpty()) {
-                // 국내: 첫날은 기상청 데이터를 바탕으로 매핑
-                dailyList.add(createFirstDayKmaForecast(today, kma24HourForecast, todayAqi, simulatedHourlyAqiMap))
-                // 둘째날부터(1..4) OWM 데이터로 생성
-                for (i in 1..4) {
-                    val localDate = targetDates[i]
-                    val dayOfWeek = getDayOfWeekStr(localDate)
-                    val dayItems = getDayItemsForDate(localDate, groups, owmItems)
-                    val dayAqi = owmAqiMap[getDateStr(localDate)] ?: 0
-                    dailyList.add(getOwmDailyForecast(localDate, dayOfWeek, dayItems, dayAqi, simulatedHourlyAqiMap, groups))
-                }
-            } else {
-                // 해외: 0..4일 전체를 OWM 데이터로 매핑
-                targetDates.forEachIndexed { index, localDate ->
-                    val dayOfWeek = if (index == 0) "오늘" else getDayOfWeekStr(localDate)
-                    val dayItems = getDayItemsForDate(localDate, groups, owmItems)
-                    val dayAqi = owmAqiMap[getDateStr(localDate)] ?: 0
-                    dailyList.add(getOwmDailyForecast(localDate, dayOfWeek, dayItems, dayAqi, simulatedHourlyAqiMap, groups))
-                }
+            // 해외 기준으로 0..4일 전체를 OWM 데이터로만 매핑 (결합은 레포지토리에서 처리)
+            targetDates.forEachIndexed { index, localDate ->
+                val dayOfWeek = if (index == 0) "오늘" else getDayOfWeekStr(localDate)
+                val dayItems = getDayItemsForDate(localDate, groups, owmItems)
+                dailyList.add(getOwmDailyForecast(localDate, dayOfWeek, dayItems, 0, emptyMap(), groups))
             }
 
             val hourlyList = owmItems.take(8).map { item ->
@@ -93,15 +63,14 @@ class OwmWeatherDataSource(client: HttpClient) : BaseRemoteDataSource(client) {
                     item.weather.firstOrNull()?.description ?: WeatherConstants.DEFAULT_CONDITION
                 )
                 val hourPop = ((item.pop ?: 0.0) * 100).toInt()
-                val hourAqiKey = "${getDateStr(localTime.date)} ${localTime.hour.toString().padStart(2, '0')}"
-                val hourAqi = simulatedHourlyAqiMap[hourAqiKey] ?: 0
 
                 HourlyForecast(
                     time = displayTime,
                     temp = item.main.temp,
                     condition = cond,
                     precipitationProbability = hourPop,
-                    aqi = hourAqi
+                    aqi = 0,
+                    rawTime = "${localTime.year}${localTime.monthNumber.toString().padStart(2, '0')}${localTime.dayOfMonth.toString().padStart(2, '0')}${localTime.hour.toString().padStart(2, '0')}00"
                 )
             }
 
@@ -226,7 +195,8 @@ class OwmWeatherDataSource(client: HttpClient) : BaseRemoteDataSource(client) {
                 temp = matchItem.main.temp,
                 condition = cond,
                 precipitationProbability = hourPop,
-                aqi = hourAqi
+                aqi = hourAqi,
+                rawTime = "${localTime.year}${localTime.monthNumber.toString().padStart(2, '0')}${localTime.dayOfMonth.toString().padStart(2, '0')}${localTime.hour.toString().padStart(2, '0')}00"
             )
         }
 
@@ -239,70 +209,8 @@ class OwmWeatherDataSource(client: HttpClient) : BaseRemoteDataSource(client) {
             minTemp = minTemp,
             maxTemp = maxTemp,
             aqi = dayAqi,
-            hourlyDetails = hourlyDetails
-        )
-    }
-
-    private fun parseKoreanHour(timeStr: String): Int {
-        val isPm = timeStr.contains("오후")
-        val rawHour = timeStr
-            .substringAfter(if (isPm) "오후 " else "오전 ")
-            .substringBefore("시")
-            .trim()
-            .toIntOrNull() ?: 12
-        return if (isPm) {
-            if (rawHour == 12) 12 else rawHour + 12
-        } else {
-            if (rawHour == 12) 0 else rawHour
-        }
-    }
-
-    private fun createFirstDayKmaForecast(
-        today: LocalDate,
-        kma24HourForecast: RawWeatherData,
-        dayAqi: Int,
-        simulatedHourlyAqiMap: Map<String, Int>
-    ): DailyForecast {
-        val dateKey = "${today.monthNumber}/${today.dayOfMonth}"
-        val kmaToday = kma24HourForecast.daily.firstOrNull { it.date == dateKey }
-            ?: kma24HourForecast.daily.firstOrNull()
-
-        val minTemp = kmaToday?.minTemp ?: 0.0
-        val maxTemp = kmaToday?.maxTemp ?: 0.0
-        val pop = kmaToday?.precipitationProbability ?: 0
-        val morningCond = kmaToday?.morningCondition ?: WeatherConstants.DEFAULT_CONDITION
-        val afternoonCond = kmaToday?.afternoonCondition ?: WeatherConstants.DEFAULT_CONDITION
-
-        val targetHours = listOf(6, 9, 12, 15, 18, 21, 24)
-        val hourlyDetails = targetHours.mapNotNull { targetHour ->
-            val itemHour = if (targetHour == 24) 0 else targetHour
-
-            val matchKma = kma24HourForecast.hourly.firstOrNull { item ->
-                parseKoreanHour(item.time) == itemHour
-            } ?: kma24HourForecast.hourly.minByOrNull { item ->
-                abs(parseKoreanHour(item.time) - itemHour)
-            } ?: return@mapNotNull null
-
-            val displayTime = "${targetHour.toString().padStart(2, '0')}시"
-            HourlyForecast(
-                time = displayTime,
-                temp = matchKma.temp,
-                condition = matchKma.condition,
-                precipitationProbability = matchKma.precipitationProbability,
-                aqi = matchKma.aqi
-            )
-        }
-
-        return DailyForecast(
-            date = dateKey,
-            dayOfWeek = "오늘",
-            precipitationProbability = pop,
-            morningCondition = morningCond,
-            afternoonCondition = afternoonCond,
-            minTemp = minTemp,
-            maxTemp = maxTemp,
-            aqi = dayAqi,
-            hourlyDetails = hourlyDetails
+            hourlyDetails = hourlyDetails,
+            rawDate = getDateStr(localDate)
         )
     }
 }

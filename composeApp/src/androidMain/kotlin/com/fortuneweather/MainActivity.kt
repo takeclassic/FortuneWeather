@@ -36,6 +36,9 @@ import com.google.android.gms.ads.MobileAds
 import com.google.android.gms.ads.interstitial.InterstitialAd
 import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback
 import com.fortuneweather.ui.FortuneDetailScreen
+import com.fortuneweather.ui.FashionDetailScreen
+import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
 
 class MainActivity : ComponentActivity() {
 
@@ -142,38 +145,73 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                Box(modifier = Modifier.fillMaxSize()) {
+                val backgroundColors = listOf(
+                    Color(0xFF1E3C72),
+                    Color(0xFF2A5298)
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(brush = Brush.verticalGradient(colors = backgroundColors))
+                ) {
                     val state = uiState
-                    if (currentScreen == "fortune" && state is WeatherUiState.Success) {
-                        BackHandler {
-                            viewModel.resetSaju()
-                            currentScreen = "main"
+                    AnimatedContent(
+                        targetState = currentScreen,
+                        transitionSpec = {
+                            if (targetState == "main") {
+                                slideInHorizontally(animationSpec = tween(300)) { -it / 3 } + fadeIn(animationSpec = tween(300)) togetherWith
+                                slideOutHorizontally(animationSpec = tween(300)) { it } + fadeOut(animationSpec = tween(300))
+                            } else {
+                                slideInHorizontally(animationSpec = tween(300)) { it } + fadeIn(animationSpec = tween(300)) togetherWith
+                                slideOutHorizontally(animationSpec = tween(300)) { -it / 3 } + fadeOut(animationSpec = tween(300))
+                            }
                         }
-                        
-                        FortuneDetailScreen(
-                            viewModel = viewModel,
-                            onShowAd = { onAdClosed ->
-                                showInterstitialAd(onAdClosed)
-                            },
-                            onBackClick = {
+                    ) { screen ->
+                        if (screen == "fortune" && state is WeatherUiState.Success) {
+                            BackHandler {
                                 viewModel.resetSaju()
                                 currentScreen = "main"
                             }
-                        )
-                    } else {
-                        when (state) {
-                            is WeatherUiState.Loading -> LoadingScreen()
-                            is WeatherUiState.Success -> {
-                                WeatherApp(
-                                    weatherInfo = state.weatherInfo,
-                                    isRefreshing = isRefreshing,
-                                    onRefresh = { handleRefreshAction() },
-                                    onFortuneClick = {
-                                        currentScreen = "fortune"
-                                    }
-                                )
+                            
+                            FortuneDetailScreen(
+                                viewModel = viewModel,
+                                onShowAd = { onAdClosed ->
+                                    showInterstitialAd(onAdClosed)
+                                },
+                                onBackClick = {
+                                    viewModel.resetSaju()
+                                    currentScreen = "main"
+                                }
+                            )
+                        } else if (screen == "fashion" && state is WeatherUiState.Success) {
+                            BackHandler {
+                                currentScreen = "main"
                             }
-                            is WeatherUiState.Error -> ErrorScreen(state.message, "다시 시도", { handleRefreshAction() })
+                            
+                            FashionDetailScreen(
+                                weatherInfo = state.weatherInfo,
+                                onBackClick = {
+                                    currentScreen = "main"
+                                }
+                            )
+                        } else {
+                            when (state) {
+                                is WeatherUiState.Loading -> LoadingScreen()
+                                is WeatherUiState.Success -> {
+                                    WeatherApp(
+                                        weatherInfo = state.weatherInfo,
+                                        isRefreshing = isRefreshing,
+                                        onRefresh = { handleRefreshAction() },
+                                        onFortuneClick = {
+                                            currentScreen = "fortune"
+                                        },
+                                        onFashionClick = {
+                                            currentScreen = "fashion"
+                                        }
+                                    )
+                                }
+                                is WeatherUiState.Error -> ErrorScreen(state.message, "다시 시도", { handleRefreshAction() })
+                            }
                         }
                     }
                 }
