@@ -492,7 +492,7 @@ class WeatherRepository(
         gender: String,
         forceRefresh: Boolean = false
     ): SajuFortune {
-        val today = Clock.System.now().toLocalDateTime(systemZone)
+        val today = Clock.System.now().toLocalDateTime(TimeZone.of("Asia/Seoul"))
         val todayDateStr = "${today.year}-${today.monthNumber}-${today.dayOfMonth}"
         val inputCombo = "${birthDate}_${birthTime}_${isLunar}_${gender}"
         
@@ -542,7 +542,7 @@ class WeatherRepository(
         isLunar: Boolean,
         gender: String
     ): Boolean {
-        val today = Clock.System.now().toLocalDateTime(systemZone)
+        val today = Clock.System.now().toLocalDateTime(TimeZone.of("Asia/Seoul"))
         val todayDateStr = "${today.year}-${today.monthNumber}-${today.dayOfMonth}"
         val inputCombo = "${birthDate}_${birthTime}_${isLunar}_${gender}"
         return try {
