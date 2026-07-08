@@ -97,12 +97,15 @@ fun FortuneDetailScreen(
                     "모름"
                 }
             }
+            val cachedDate = CacheManager.getCache("saju_result_date")
+            val isDateChanged = cachedDate != todayDateStr
+
             viewModel.loadSajuFortune(
                 birthDate = formattedDate,
                 birthTime = formattedTime,
                 isLunar = isLunar,
                 gender = gender,
-                forceRefresh = false
+                forceRefresh = isDateChanged
             )
         }
     }

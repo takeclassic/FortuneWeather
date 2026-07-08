@@ -514,13 +514,22 @@ class WeatherRepository(
         // 1. Get correct local Saju pillars first
         val localHanja = getSajuHanjaOnly(birthDate, birthTime, isLunar, gender)
         
-        // 2. Fetch fortune using local Hanja as a fixed anchor
+        // 2. Calculate today's local Iljin (heavenly stem and earthly branch)
+        val todayParts = todayDateStr.split("-")
+        val todayYear = todayParts[0].toIntOrNull() ?: 2026
+        val todayMonth = todayParts[1].toIntOrNull() ?: 1
+        val todayDay = todayParts[2].toIntOrNull() ?: 1
+        val todayPillars = SajuCalculator.calculate(todayYear, todayMonth, todayDay, "12:00")
+        val todayIljin = todayPillars.dayHanja
+        
+        // 3. Fetch fortune using local Hanja and today's Iljin as parameters
         val newSaju = geminiSajuDataSource.fetchSajuFortune(
             birthDate = birthDate,
             birthTime = birthTime,
             isLunar = isLunar,
             gender = gender,
             todayDate = todayDateStr,
+            todayIljin = todayIljin,
             localHanja = localHanja
         )
         

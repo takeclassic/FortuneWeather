@@ -66,6 +66,7 @@ class GeminiSajuDataSource(client: HttpClient) : BaseRemoteDataSource(client) {
         isLunar: Boolean,
         gender: String,
         todayDate: String,
+        todayIljin: String,
         localHanja: SajuHanja
     ): SajuFortune {
         if (apiKey.isBlank()) {
@@ -78,6 +79,7 @@ class GeminiSajuDataSource(client: HttpClient) : BaseRemoteDataSource(client) {
 태어난 시각: $birthTime
 음력/양력 여부: ${if (isLunar) "음력" else "양력"}
 오늘 날짜: $todayDate
+오늘 날짜의 일진 기운 (천간지지): $todayIljin
 
 [제공된 사용자의 사주팔자 한자 (100% 고정값)]
 - 년주: ${localHanja.yearHanja}
@@ -86,13 +88,15 @@ class GeminiSajuDataSource(client: HttpClient) : BaseRemoteDataSource(client) {
 - 시주: ${localHanja.hourHanja}
 
 당신은 정확한 역법 계산을 제공하는 정통 명리학 대가입니다.
-위에 제공된 [제공된 사용자의 사주팔자 한자 (100% 고정값)]를 사용자의 사주팔자로 완전히 고정하고 이를 바탕으로 사주 풀이를 진행해야 합니다. 절대로 사용자의 한자를 임의로 바꾸거나 다시 계산하여 다른 한자를 출력값에 넣지 마십시오. 출력 JSON의 yearHanja, monthHanja, dayHanja, hourHanja에는 반드시 위의 값을 그대로 복사해서 넣으십시오.
+위에 제공된 [제공된 사용자의 사주팔자 한자 (100% 고정값)]를 사용자의 출생 사주팔자로 고정하십시오.
+그리고 [오늘 날짜의 일진 기운 (천간지지): $todayIljin]을 오늘의 고유한 일진 간지로 완벽하게 대입하여 분석을 실행해야 합니다.
 
-이를 기반한 오늘 하루의 사주 풀이와 운세 정보를 분석해주세요.
+오늘 하루의 운세(overallMsg, moneyMsg, loveMsg, healthMsg 등)를 작성할 때는 반드시 사용자의 고정 사주팔자와 [오늘 날짜의 일진 기운: $todayIljin] 사이의 오행 상생상극, 십신(육친) 관계, 합(삼합/방합/육합), 충(육충) 관계를 철저히 논리적으로 분석하여 도출하십시오.
+날짜가 달라져 [오늘 날짜의 일진 기운: $todayIljin]의 천간과 지지가 변경되면, 그날의 기운 상호작용이 180도 완전히 달라지므로 오늘 하루에 주어지는 구체적인 점괘 총평과 돈의 흐름, 애정의 방향, 조언 등이 그날의 간지에 걸맞게 명확하게 다르고 독창적으로 도출되어야 합니다.
 
 [별점 도출 원칙 (결정론적 계산)]
-- 각 별점(overallStars, moneyStars, loveStars)은 출생 사주팔자(특히 일간)와 오늘의 운기(오늘 날짜의 일진) 사이의 오행 상생상극, 합/충 관계를 논리적으로 계산하여 1성부터 5성까지 다양하게 도출해야 합니다.
-- 동일한 입력값(생년월일, 성별, 시각, 음양, 오늘 날짜)에 대해서는 항상 정확히 동일한 별점과 풀이가 출력되도록 결정론적으로 연산하십시오. 절대로 대충 4성으로 일관되게 채우지 말고, 오늘의 오행 분포와 조화에 따라 1성에서 5성 사이의 정수를 논리적 규칙에 의해 도출하십시오.
+- 각 별점(overallStars, moneyStars, loveStars)은 출생 사주팔자(특히 일간)와 오늘의 운기(오늘 날짜의 일진: $todayIljin) 사이의 오행 상생상극, 합/충 관계를 논리적으로 계산하여 1성부터 5성까지 다양하게 도출해야 합니다.
+- 동일한 입력값(생년월일, 성별, 시각, 음양, 오늘 날짜 및 오늘의 일진)에 대해서는 항상 정확히 동일한 별점과 풀이가 출력되도록 결정론적으로 연산하십시오. 절대로 대충 4성으로 일관되게 채우지 말고, 오늘의 오행 분포와 조화에 따라 1성에서 5성 사이의 정수를 논리적 규칙에 의해 도출하십시오.
 
 결과는 반드시 JSON 형식으로만 응답해야 하며, 마크다운 기호(```json 등)는 절대 포함하지 말고 순수 JSON 문자열만 반환해주세요.
 
